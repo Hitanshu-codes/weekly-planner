@@ -1,18 +1,23 @@
 import { type NextRequest, NextResponse } from "next/server"
 import connectDB from "@/lib/mongodb"
-import { Task, TimeSlot, WeeklySchedule, HistoryEntry, EisenhowerCategory } from "@/lib/models"
+import { Task, TimeSlot, WeeklySchedule, HistoryEntry, User, EisenhowerCategory } from "@/lib/models"
+import { Types } from "mongoose"
 
 export async function POST(request: NextRequest) {
   try {
     console.log("[API] Starting schedule generation request")
 
-    const { goals } = await request.json()
-    console.log("[API] Received goals:", goals)
+    const { goals, userId } = await request.json()
+    console.log("[API] Received goals:", goals, "userId:", userId)
 
     if (!goals) {
       console.log("[API] Error: No goals provided")
       return NextResponse.json({ error: "Goals are required" }, { status: 400 })
     }
+
+    // For now, use a default user if no userId provided
+    // In a real app, this would come from authentication
+    const currentUserId = userId || "default-user"
 
     // Check for Gemini API key
     const apiKey = process.env.GEMINI_API_KEY
@@ -335,10 +340,29 @@ Guidelines:
       await connectDB()
       console.log("[API] Connected to MongoDB")
 
-      // Generate a unique schedule ID
-      const scheduleId = `schedule-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      const userId = "default-user" // In a real app, this would come from authentication
+      // Get or create user
+      let user
+      if (currentUserId === "default-user") {
+        // Create a default user for demo purposes
+        user = await User.findOne({ email: "demo@example.com" })
+        if (!user) {
+          user = new User({
+            email: "demo@example.com",
+            passwordHash: "demo-hash",
+            name: "Demo User",
+            themePreference: "light"
+          })
+          await user.save()
+        }
+      } else {
+        user = await User.findById(currentUserId)
+        if (!user) {
+          return NextResponse.json({ error: "User not found" }, { status: 404 })
+        }
+      }
+
       const weekStartDate = new Date()
+      weekStartDate.setHours(0, 0, 0, 0) // Start of the week
 
       // Create tasks and time slots
       const createdTasks = []
@@ -365,9 +389,9 @@ Guidelines:
             const validPriorities = ['high', 'medium', 'low']
             const normalizedPriority = validPriorities.includes(task.priority) ? task.priority : "medium"
 
-            // Create task
+            // Create task with new model structure
             const newTask = new Task({
-              id: `task-${scheduleId}-${day}-${hour}`,
+              userId: user._id,
               title: task.title || "Generated Task",
               description: task.description || "",
               priority: normalizedPriority,
@@ -380,12 +404,22 @@ Guidelines:
             const savedTask = await newTask.save()
             createdTasks.push(savedTask)
 
-            // Create time slot
+            // Create time slot with new model structure
+            const dayDate = new Date(weekStartDate)
+            const dayIndex = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(day)
+            dayDate.setDate(dayDate.getDate() + dayIndex)
+
+            const startTime = new Date(dayDate)
+            startTime.setHours(parseInt(hour), 0, 0, 0)
+
+            const endTime = new Date(dayDate)
+            endTime.setHours(parseInt(hour) + 1, 0, 0, 0)
+
             const timeSlot = new TimeSlot({
-              id: `${day}-${hour}`,
-              day: day,
-              startHour: parseInt(hour),
-              endHour: parseInt(hour) + 1,
+              userId: user._id,
+              day: dayDate,
+              startTime: startTime,
+              endTime: endTime,
               task: savedTask._id,
               merged: false,
             })
@@ -398,7 +432,7 @@ Guidelines:
 
       // Create weekly schedule
       const weeklySchedule = new WeeklySchedule({
-        userId: userId,
+        userId: user._id,
         weekStartDate: weekStartDate,
         goals: goals,
         timeSlots: createdTimeSlots.map(ts => ts._id),
@@ -409,15 +443,16 @@ Guidelines:
 
       // Create history entry
       const historyEntry = new HistoryEntry({
-        userId: userId,
-        scheduleId: savedSchedule._id.toString(),
+        userId: user._id,
+        scheduleId: savedSchedule._id,
         action: "create",
         entityType: "task",
-        entityId: scheduleId,
+        entityId: savedSchedule._id.toString(),
         details: {
           description: `Created weekly schedule with ${createdTasks.length} tasks based on goals: ${goals}`,
           to: { scheduleId: savedSchedule._id, taskCount: createdTasks.length }
-        }
+        },
+        performedBy: user._id
       })
 
       await historyEntry.save()
@@ -428,7 +463,7 @@ Guidelines:
       return NextResponse.json({
         ...schedule,
         _id: savedSchedule._id,
-        scheduleId: scheduleId,
+        scheduleId: savedSchedule._id.toString(),
         taskCount: createdTasks.length,
         savedAt: new Date().toISOString()
       })

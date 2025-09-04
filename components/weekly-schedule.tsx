@@ -7,10 +7,10 @@ import { Badge } from "@/components/ui/badge"
 import { Clock, Check, Merge, GripVertical, History } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useDragDrop } from "@/hooks/use-drag-drop"
-import { usePersistentState, useHistory } from "@/hooks/use-persistent-state"
 
 interface Task {
-  id: string
+  _id: string
+  uuid: string
   title: string
   description?: string
   priority: "high" | "medium" | "low"
@@ -21,10 +21,10 @@ interface Task {
 }
 
 interface TimeSlot {
-  id: string
-  day: string
-  startHour: number
-  endHour: number
+  _id: string
+  day: Date
+  startTime: Date
+  endTime: Date
   task?: Task
   merged: boolean
 }
@@ -49,167 +49,180 @@ const eisenhowerColors = {
 
 export function WeeklySchedule({ schedule }: ScheduleProps) {
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-  const [timeSlots, setTimeSlots, slotsLoaded] = usePersistentState<TimeSlot[]>("weekly-schedule", [])
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-  console.log("[WeeklySchedule] Component render - schedule:", schedule, "slotsLoaded:", slotsLoaded, "timeSlots.length:", timeSlots.length)
+  console.log("[WeeklySchedule] Component render - schedule:", schedule, "timeSlots.length:", timeSlots.length)
 
   const { draggedItem, dragOverTarget, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave } = useDragDrop()
-  const { addHistoryEntry, getHistoryByWeek } = useHistory()
 
+  // Fetch time slots from MongoDB
   useEffect(() => {
-    console.log("[WeeklySchedule] useEffect triggered")
-    console.log("[WeeklySchedule] slotsLoaded:", slotsLoaded)
-    console.log("[WeeklySchedule] schedule prop:", schedule)
-    console.log("[WeeklySchedule] schedule type:", typeof schedule)
-    console.log("[WeeklySchedule] schedule keys:", schedule ? Object.keys(schedule) : "no schedule")
-    console.log("[WeeklySchedule] schedule stringified:", JSON.stringify(schedule, null, 2))
-    console.log("[WeeklySchedule] current timeSlots:", timeSlots)
-
-    if (!slotsLoaded || !schedule) {
-      console.log("[WeeklySchedule] Early return - slotsLoaded:", slotsLoaded, "schedule:", !!schedule)
-      return
+    const fetchTimeSlots = async () => {
+      try {
+        const response = await fetch('/api/time-slots?userId=default-user')
+        if (response.ok) {
+          const data = await response.json()
+          setTimeSlots(data)
+        }
+      } catch (error) {
+        console.error('Error fetching time slots:', error)
+      } finally {
+        setLoading(false)
+      }
     }
 
-    const slots: TimeSlot[] = []
-    console.log("[WeeklySchedule] Creating new slots from schedule")
-    console.log("[WeeklySchedule] Days to iterate:", days)
-    console.log("[WeeklySchedule] Schedule days available:", Object.keys(schedule))
+    fetchTimeSlots()
+  }, [])
 
-    days.forEach((day) => {
-      for (let hour = 8; hour <= 21; hour++) {
-        const slotId = `${day}-${hour}`
+  // Process schedule data when it changes
+  useEffect(() => {
+    if (!schedule || loading) return
 
-        // Check if we already have this slot in persistent storage
-        const existingSlot = timeSlots.find((slot) => slot.id === slotId)
+    const processSchedule = async () => {
+      try {
+        const slots: TimeSlot[] = []
 
-        if (existingSlot) {
-          slots.push(existingSlot)
-        } else {
-          let task: Task | undefined
+        for (const day of days) {
+          for (let hour = 8; hour <= 21; hour++) {
+            const slotId = `${day}-${hour}`
 
-          // Parse schedule data if available
-          console.log("[WeeklySchedule] Checking if schedule has day:", day, "Result:", !!schedule[day])
-          if (schedule[day]) {
-            const daySchedule = schedule[day]
-            console.log("[WeeklySchedule] Day schedule keys:", Object.keys(daySchedule))
-            console.log("[WeeklySchedule] Day schedule for", day, ":", daySchedule)
+            // Check if we already have this slot
+            const existingSlot = timeSlots.find((slot) => {
+              const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
+              const slotHour = new Date(slot.startTime).getHours()
+              return slotDay === day && slotHour === hour
+            })
 
-            // Try different time formats
-            const timeFormats = [
-              hour.toString(),
-              `${hour}:00`,
-              `${hour}am`,
-              `${hour}pm`,
-              `${hour}:00am`,
-              `${hour}:00pm`
-            ]
+            if (existingSlot) {
+              slots.push(existingSlot)
+            } else {
+              let task: Task | undefined
 
-            console.log("[WeeklySchedule] Trying time formats for hour", hour, ":", timeFormats)
+              // Parse schedule data if available
+              if (schedule[day]) {
+                const daySchedule = schedule[day]
+                const timeFormats = [
+                  hour.toString(),
+                  `${hour}:00`,
+                  `${hour}am`,
+                  `${hour}pm`,
+                  `${hour}:00am`,
+                  `${hour}:00pm`
+                ]
 
-            let taskData = null
-            for (const format of timeFormats) {
-              if (daySchedule[format]) {
-                taskData = daySchedule[format]
-                console.log("[WeeklySchedule] Found task data with format", format, ":", taskData)
-                break
+                let taskData = null
+                for (const format of timeFormats) {
+                  if (daySchedule[format]) {
+                    taskData = daySchedule[format]
+                    break
+                  }
+                }
+
+                if (taskData) {
+                  // Create task via API
+                  const response = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      title: taskData.title || taskData.task || "Generated Task",
+                      description: taskData.description || "",
+                      priority: taskData.priority || "medium",
+                      category: taskData.category || "General",
+                      eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
+                      duration: taskData.duration || 1,
+                      userId: 'default-user'
+                    }),
+                  })
+
+                  if (response.ok) {
+                    task = await response.json()
+                  }
+                }
               }
-            }
 
-            // If no task found with time formats, try to find any task for this day
-            if (!taskData && Object.keys(daySchedule).length > 0) {
-              console.log("[WeeklySchedule] No time-based task found, checking for any task data")
-              const firstKey = Object.keys(daySchedule)[0]
-              const firstTask = daySchedule[firstKey]
-              if (firstTask && typeof firstTask === "object") {
-                console.log("[WeeklySchedule] Using first available task as fallback:", firstTask)
-                taskData = firstTask
-              }
-            }
+              // Create time slot via API
+              const dayDate = new Date()
+              const dayIndex = days.indexOf(day)
+              dayDate.setDate(dayDate.getDate() - dayDate.getDay() + dayIndex + 1) // Monday = 1
 
-            if (taskData) {
-              console.log("[WeeklySchedule] Creating task from taskData:", taskData)
-              task = {
-                id: `task-${slotId}`,
-                title: taskData.title || taskData.task || "Generated Task",
-                description: taskData.description || "",
-                priority: taskData.priority || "medium",
-                category: taskData.category || "General",
-                eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
-                completed: false,
-                duration: taskData.duration || 1,
-              }
+              const startTime = new Date(dayDate)
+              startTime.setHours(hour, 0, 0, 0)
 
-              console.log("[WeeklySchedule] Created task:", task)
+              const endTime = new Date(dayDate)
+              endTime.setHours(hour + 1, 0, 0, 0)
 
-              // Log task creation
-              addHistoryEntry({
-                action: "create",
-                entityType: "task",
-                entityId: task.id,
-                details: {
-                  description: `Created task: ${task.title} in ${day} at ${hour}:00`,
-                  to: { slotId, task },
+              const slotResponse = await fetch('/api/time-slots', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
                 },
+                body: JSON.stringify({
+                  day: dayDate.toISOString(),
+                  startTime: startTime.toISOString(),
+                  endTime: endTime.toISOString(),
+                  taskId: task?._id,
+                  userId: 'default-user'
+                }),
               })
+
+              if (slotResponse.ok) {
+                const newSlot = await slotResponse.json()
+                slots.push(newSlot)
+              }
             }
           }
-
-          const newSlot = {
-            id: slotId,
-            day,
-            startHour: hour,
-            endHour: hour + 1,
-            task,
-            merged: false,
-          }
-
-          console.log("[WeeklySchedule] Creating new slot:", newSlot)
-          slots.push(newSlot)
         }
+
+        setTimeSlots(slots)
+      } catch (error) {
+        console.error('Error processing schedule:', error)
       }
-    })
+    }
 
-    console.log("[WeeklySchedule] Final slots array:", slots)
-    console.log("[WeeklySchedule] Final slots array length:", slots.length)
-    console.log("[WeeklySchedule] Setting timeSlots with:", slots)
-    setTimeSlots(slots)
-  }, [schedule, slotsLoaded])
+    processSchedule()
+  }, [schedule, loading])
 
-  const toggleTaskCompletion = (slotId: string) => {
+  const toggleTaskCompletion = async (slotId: string) => {
     console.log("[WeeklySchedule] toggleTaskCompletion called for slotId:", slotId)
-    setTimeSlots((slots) => {
-      const newSlots = slots.map((slot) => {
-        if (slot.id === slotId && slot.task) {
-          const newCompleted = !slot.task.completed
-          console.log("[WeeklySchedule] Toggling task completion:", slot.task.title, "from", slot.task.completed, "to", newCompleted)
+    const slot = timeSlots.find(s => s._id === slotId)
+    if (!slot || !slot.task) return
 
-          // Log completion action
-          addHistoryEntry({
-            action: "complete",
-            entityType: "task",
-            entityId: slot.task.id,
-            details: {
-              description: `${newCompleted ? "Completed" : "Uncompleted"} task: ${slot.task.title}`,
-              from: { completed: slot.task.completed },
-              to: { completed: newCompleted },
-            },
-          })
+    const newCompleted = !slot.task.completed
 
-          return { ...slot, task: { ...slot.task, completed: newCompleted } }
-        }
-        return slot
+    try {
+      const response = await fetch(`/api/tasks/${slot.task._id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          completed: newCompleted
+        }),
       })
 
-      console.log("[WeeklySchedule] Updated slots after completion toggle:", newSlots.length)
-      return newSlots
-    })
+      if (response.ok) {
+        setTimeSlots((slots) => {
+          return slots.map((s) => {
+            if (s._id === slotId && s.task) {
+              return { ...s, task: { ...s.task, completed: newCompleted } }
+            }
+            return s
+          })
+        })
+      }
+    } catch (error) {
+      console.error('Error updating task completion:', error)
+    }
   }
 
-  const mergeWithNext = (slotId: string) => {
+  const mergeWithNext = async (slotId: string) => {
     console.log("[WeeklySchedule] mergeWithNext called for slotId:", slotId)
-    const slotIndex = timeSlots.findIndex((slot) => slot.id === slotId)
+    const slotIndex = timeSlots.findIndex((slot) => slot._id === slotId)
     const nextSlotIndex = slotIndex + 1
 
     console.log("[WeeklySchedule] Slot indices - current:", slotIndex, "next:", nextSlotIndex, "total slots:", timeSlots.length)
@@ -221,49 +234,63 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
       console.log("[WeeklySchedule] Current slot:", currentSlot, "Next slot:", nextSlot)
 
       // Only merge if they're on the same day and consecutive hours
-      if (currentSlot.day === nextSlot.day && currentSlot.endHour === nextSlot.startHour) {
+      const currentDay = new Date(currentSlot.day).toDateString()
+      const nextDay = new Date(nextSlot.day).toDateString()
+      const currentEndHour = new Date(currentSlot.endTime).getHours()
+      const nextStartHour = new Date(nextSlot.startTime).getHours()
+
+      if (currentDay === nextDay && currentEndHour === nextStartHour) {
         console.log("[WeeklySchedule] Merge conditions met - same day and consecutive hours")
-        console.log("[WeeklySchedule] Merging slots - current:", currentSlot, "next:", nextSlot)
-        setTimeSlots((slots) => {
-          const newSlots = [...slots]
-          // Extend current slot
-          newSlots[slotIndex] = {
-            ...currentSlot,
-            endHour: nextSlot.endHour,
-            merged: true,
-          }
-          // Remove next slot
-          newSlots.splice(nextSlotIndex, 1)
 
-          console.log("[WeeklySchedule] Merged slot result:", newSlots[slotIndex])
-
-          // Log merge action
-          addHistoryEntry({
-            action: "merge",
-            entityType: "timeSlot",
-            entityId: currentSlot.id,
-            details: {
-              description: `Merged ${currentSlot.day} ${currentSlot.startHour}:00 with ${nextSlot.startHour}:00`,
-              from: { slots: [currentSlot, nextSlot] },
-              to: { mergedSlot: newSlots[slotIndex] },
+        try {
+          // Update current slot to extend end time
+          const newEndTime = new Date(nextSlot.endTime)
+          const response = await fetch(`/api/time-slots/${currentSlot._id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
             },
+            body: JSON.stringify({
+              endTime: newEndTime.toISOString(),
+              merged: true
+            }),
           })
 
-          console.log("[WeeklySchedule] Merge completed successfully")
-          return newSlots
-        })
+          if (response.ok) {
+            // Delete the next slot
+            await fetch(`/api/time-slots/${nextSlot._id}`, {
+              method: 'DELETE'
+            })
+
+            // Update local state
+            setTimeSlots((slots) => {
+              const newSlots = [...slots]
+              newSlots[slotIndex] = {
+                ...currentSlot,
+                endTime: newEndTime,
+                merged: true,
+              }
+              newSlots.splice(nextSlotIndex, 1)
+              return newSlots
+            })
+
+            console.log("[WeeklySchedule] Merge completed successfully")
+          }
+        } catch (error) {
+          console.error('Error merging slots:', error)
+        }
       } else {
         console.log("[WeeklySchedule] Merge conditions not met:")
-        console.log("[WeeklySchedule] - Same day:", currentSlot.day === nextSlot.day)
-        console.log("[WeeklySchedule] - Consecutive hours:", currentSlot.endHour === nextSlot.startHour)
-        console.log("[WeeklySchedule] - Current endHour:", currentSlot.endHour, "Next startHour:", nextSlot.startHour)
+        console.log("[WeeklySchedule] - Same day:", currentDay === nextDay)
+        console.log("[WeeklySchedule] - Consecutive hours:", currentEndHour === nextStartHour)
+        console.log("[WeeklySchedule] - Current endHour:", currentEndHour, "Next startHour:", nextStartHour)
       }
     } else {
       console.log("[WeeklySchedule] Cannot merge - next slot index out of bounds")
     }
   }
 
-  const handleTaskDrop = (targetSlotId: string) => {
+  const handleTaskDrop = async (targetSlotId: string) => {
     console.log("[WeeklySchedule] handleTaskDrop called with targetSlotId:", targetSlotId)
     console.log("[WeeklySchedule] draggedItem:", draggedItem)
 
@@ -278,67 +305,105 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
       return
     }
 
-    setTimeSlots((slots) => {
-      const newSlots = [...slots]
-      const sourceIndex = newSlots.findIndex((slot) => slot.id === sourceSlotId)
-      const targetIndex = newSlots.findIndex((slot) => slot.id === targetSlotId)
+    const sourceSlot = timeSlots.find(s => s._id === sourceSlotId)
+    const targetSlot = timeSlots.find(s => s._id === targetSlotId)
 
-      if (sourceIndex === -1 || targetIndex === -1) return slots
+    if (!sourceSlot || !targetSlot || !sourceSlot.task) {
+      console.log("[WeeklySchedule] Invalid slots or no task to move")
+      return
+    }
 
-      const sourceSlot = newSlots[sourceIndex]
-      const targetSlot = newSlots[targetIndex]
+    try {
+      // Update target slot with the task
+      const targetResponse = await fetch(`/api/time-slots/${targetSlotId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task: sourceSlot.task._id
+        }),
+      })
 
-      // Move task from source to target
-      if (sourceSlot.task) {
-        console.log("[WeeklySchedule] Moving task:", sourceSlot.task.title, "from", sourceSlotId, "to", targetSlotId)
-        newSlots[targetIndex] = { ...targetSlot, task: sourceSlot.task }
-        newSlots[sourceIndex] = { ...sourceSlot, task: undefined }
-
-        // Log move action
-        addHistoryEntry({
-          action: "move",
-          entityType: "task",
-          entityId: sourceSlot.task.id,
-          details: {
-            description: `Moved task "${sourceSlot.task.title}" from ${sourceSlot.day} ${sourceSlot.startHour}:00 to ${targetSlot.day} ${targetSlot.startHour}:00`,
-            from: { slotId: sourceSlotId },
-            to: { slotId: targetSlotId },
+      if (targetResponse.ok) {
+        // Clear source slot task
+        const sourceResponse = await fetch(`/api/time-slots/${sourceSlotId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            task: null
+          }),
         })
 
-        console.log("[WeeklySchedule] Task move completed successfully")
-      } else {
-        console.log("[WeeklySchedule] No task to move in source slot")
-      }
+        if (sourceResponse.ok) {
+          // Update local state
+          setTimeSlots((slots) => {
+            return slots.map((slot) => {
+              if (slot._id === targetSlotId) {
+                return { ...slot, task: sourceSlot.task }
+              } else if (slot._id === sourceSlotId) {
+                return { ...slot, task: undefined }
+              }
+              return slot
+            })
+          })
 
-      return newSlots
-    })
+          console.log("[WeeklySchedule] Task move completed successfully")
+        }
+      }
+    } catch (error) {
+      console.error('Error moving task:', error)
+    }
   }
 
-  const formatTimeRange = (startHour: number, endHour: number) => {
-    const formatHour = (hour: number) => {
+  const formatTimeRange = (startTime: Date, endTime: Date) => {
+    const formatHour = (date: Date) => {
+      const hour = date.getHours()
       if (hour === 12) return "12pm"
       if (hour > 12) return `${hour - 12}pm`
       return `${hour}am`
     }
 
+    const startHour = startTime.getHours()
+    const endHour = endTime.getHours()
+
     if (endHour - startHour === 1) {
-      return formatHour(startHour)
+      return formatHour(startTime)
     }
-    return `${formatHour(startHour)} - ${formatHour(endHour)}`
+    return `${formatHour(startTime)} - ${formatHour(endTime)}`
   }
 
   const getSlotsByDay = (day: string) => {
-    const daySlots = timeSlots.filter((slot) => slot.day === day)
+    const daySlots = timeSlots.filter((slot) => {
+      const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
+      return slotDay === day
+    })
     console.log("[WeeklySchedule] getSlotsByDay for", day, ":", daySlots.length, "slots")
     return daySlots
   }
 
-  const weekHistory = getHistoryByWeek(new Date())
-
-  console.log("[WeeklySchedule] Render - schedule:", schedule, "timeSlots.length:", timeSlots.length, "slotsLoaded:", slotsLoaded)
+  console.log("[WeeklySchedule] Render - schedule:", schedule, "timeSlots.length:", timeSlots.length, "loading:", loading)
   console.log("[WeeklySchedule] Render - timeSlots sample:", timeSlots.slice(0, 3))
   console.log("[WeeklySchedule] Render - schedule keys:", schedule ? Object.keys(schedule) : "no schedule")
+
+  if (loading) {
+    return (
+      <Card className="premium-card glow-border light-shadow animate-scale-in">
+        <CardContent className="flex items-center justify-center py-16">
+          <div className="text-center space-y-4 animate-slide-up">
+            <div className="p-4 rounded-full bg-primary/10 mx-auto w-fit">
+              <Clock className="h-16 w-16 text-primary animate-spin" />
+            </div>
+            <div className="space-y-2">
+              <p className="text-xl text-muted-foreground">Loading your schedule...</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   if (!schedule && timeSlots.length === 0) {
     console.log("[WeeklySchedule] Showing empty state - no schedule and no timeSlots")
@@ -398,57 +463,18 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
         </Card>
         <Card className="premium-card glow-border light-shadow">
           <CardContent className="p-6">
-            <div className="text-3xl font-bold text-purple-600">{weekHistory.length}</div>
-            <p className="text-sm text-muted-foreground mt-1">Actions This Week</p>
+            <div className="text-3xl font-bold text-purple-600">{timeSlots.filter((slot) => slot.task && !slot.task.completed).length}</div>
+            <p className="text-sm text-muted-foreground mt-1">Pending Tasks</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* History Toggle */}
+      {/* Header */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
           Weekly Schedule
         </h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowHistory(!showHistory)}
-          className="flex items-center gap-2 btn-premium focus-ring"
-        >
-          <History className="h-4 w-4" />
-          {showHistory ? "Hide" : "Show"} History
-        </Button>
       </div>
-
-      {/* History Panel */}
-      {showHistory && (
-        <Card className="premium-card glow-border light-shadow animate-slide-up">
-          <CardHeader>
-            <CardTitle className="text-xl font-bold bg-gradient-to-r from-green-600 to-teal-600 bg-clip-text text-transparent">
-              Activity History
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3 max-h-80 overflow-y-auto">
-              {weekHistory.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">No activity recorded this week</p>
-              ) : (
-                weekHistory.slice(0, 20).map((entry) => (
-                  <div key={entry.id} className="flex items-center gap-4 p-3 premium-card rounded-lg">
-                    <div className="text-xs text-muted-foreground font-mono min-w-fit">
-                      {new Date(entry.timestamp).toLocaleTimeString()}
-                    </div>
-                    <div className="text-sm flex-1 text-pretty">{entry.details.description}</div>
-                    <Badge variant="outline" className="text-xs">
-                      {entry.action}
-                    </Badge>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Weekly Grid - 7 Rows for Days, Horizontal Scroll for Time */}
       <div className="w-full">
@@ -501,11 +527,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                 return (
                   <div key={day} className="flex gap-4 mb-4">
                     {Array.from({ length: 14 }, (_, i) => i + 8).map((hour) => {
-                      const slot = daySlots.find(s => s.startHour === hour)
-                      const isSelected = selectedSlot === slot?.id
+                      const slot = daySlots.find(s => new Date(s.startTime).getHours() === hour)
+                      const isSelected = selectedSlot === slot?._id
                       const hasTask = !!slot?.task
-                      const isDragOver = dragOverTarget === slot?.id
-                      const isDragging = draggedItem?.data?.slotId === slot?.id
+                      const isDragOver = dragOverTarget === slot?._id
+                      const isDragging = draggedItem?.data?.slotId === slot?._id
 
                       return (
                         <div
@@ -524,20 +550,20 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                             isDragging && "drag-preview",
                             "premium-card",
                           )}
-                          onClick={() => slot && setSelectedSlot(isSelected ? null : slot.id)}
+                          onClick={() => slot && setSelectedSlot(isSelected ? null : slot._id)}
                           onDragOver={(e) => {
                             e.preventDefault()
                             if (slot) {
-                              console.log("[WeeklySchedule] Drag over slot:", slot.id)
-                              handleDragOver(slot.id)
+                              console.log("[WeeklySchedule] Drag over slot:", slot._id)
+                              handleDragOver(slot._id)
                             }
                           }}
                           onDragLeave={handleDragLeave}
                           onDrop={(e) => {
                             e.preventDefault()
                             if (slot) {
-                              console.log("[WeeklySchedule] Drop on slot:", slot.id)
-                              handleTaskDrop(slot.id)
+                              console.log("[WeeklySchedule] Drop on slot:", slot._id)
+                              handleTaskDrop(slot._id)
                               handleDragEnd()
                             }
                           }}
@@ -551,9 +577,9 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                 if (slot?.task) {
                                   console.log("[WeeklySchedule] Starting drag for task:", slot.task)
                                   handleDragStart({
-                                    id: slot.task.id,
+                                    id: slot.task._id,
                                     type: "task",
-                                    data: { slotId: slot.id, task: slot.task },
+                                    data: { slotId: slot._id, task: slot.task },
                                   })
                                 }
                               }}
@@ -612,8 +638,8 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     if (slot?.task) {
-                                      console.log("[WeeklySchedule] Toggling completion for slot:", slot.id, "task:", slot.task)
-                                      toggleTaskCompletion(slot.id)
+                                      console.log("[WeeklySchedule] Toggling completion for slot:", slot._id, "task:", slot.task)
+                                      toggleTaskCompletion(slot._id)
                                     }
                                   }}
                                 >
@@ -625,8 +651,8 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                   className="h-6 w-6 p-0 hover:bg-primary/10 focus-ring flex-1"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    console.log("[WeeklySchedule] Merging slot:", slot?.id, "with next")
-                                    if (slot) mergeWithNext(slot.id)
+                                    console.log("[WeeklySchedule] Merging slot:", slot?._id, "with next")
+                                    if (slot) mergeWithNext(slot._id)
                                   }}
                                 >
                                   <Merge className="h-3 w-3" />

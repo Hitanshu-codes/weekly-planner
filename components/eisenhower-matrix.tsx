@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Plus, GripVertical } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useDragDrop } from "@/hooks/use-drag-drop"
-import { usePersistentState, useHistory } from "@/hooks/use-persistent-state"
+import { EisenhowerCategory } from "@/lib/models"
 
 interface Task {
-  id: string
+  _id: string
+  uuid: string
   title: string
   quadrant: 1 | 2 | 3 | 4
   completed: boolean
@@ -49,12 +50,36 @@ interface EisenhowerMatrixProps {
 }
 
 export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
-  const [tasks, setTasks] = usePersistentState<Task[]>("matrix-tasks", [])
+  const [tasks, setTasks] = useState<Task[]>([])
   const [newTask, setNewTask] = useState("")
   const [selectedQuadrant, setSelectedQuadrant] = useState<1 | 2 | 3 | 4>(1)
+  const [loading, setLoading] = useState(true)
 
   const { draggedItem, dragOverTarget, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave } = useDragDrop()
-  const { addHistoryEntry } = useHistory()
+
+  // Fetch tasks from MongoDB
+  useEffect(() => {
+    const fetchTasks = async () => {
+      try {
+        const response = await fetch('/api/tasks?userId=default-user')
+        if (response.ok) {
+          const data = await response.json()
+          // Convert MongoDB tasks to matrix format
+          const matrixTasks = data.map((task: any) => ({
+            ...task,
+            quadrant: getQuadrantFromCategory(task.eisenhowerCategory)
+          }))
+          setTasks(matrixTasks)
+        }
+      } catch (error) {
+        console.error('Error fetching tasks:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchTasks()
+  }, [])
 
   // Convert eisenhowerCategory to quadrant number
   const getQuadrantFromCategory = (category: string): 1 | 2 | 3 | 4 => {
@@ -90,7 +115,8 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         Object.entries(schedule[day]).forEach(([hour, taskData]: [string, any]) => {
           if (taskData && typeof taskData === 'object' && taskData.eisenhowerCategory) {
             scheduleTasks.push({
-              id: `schedule-${day}-${hour}`,
+              _id: `schedule-${day}-${hour}`,
+              uuid: `schedule-${day}-${hour}`,
               title: taskData.title || "Generated Task",
               description: taskData.description || "",
               category: taskData.category || "General",
@@ -110,76 +136,98 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   // Combine manual tasks with schedule tasks
   const allTasks = [...tasks, ...getScheduleTasks()]
 
-  const addTask = () => {
+  const addTask = async () => {
     if (!newTask.trim()) return
 
-    const task: Task = {
-      id: Date.now().toString(),
-      title: newTask,
-      quadrant: selectedQuadrant,
-      completed: false,
+    try {
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: newTask,
+          eisenhowerCategory: getCategoryFromQuadrant(selectedQuadrant),
+          userId: 'default-user'
+        }),
+      })
+
+      if (response.ok) {
+        const newTaskData = await response.json()
+        const matrixTask = {
+          ...newTaskData,
+          quadrant: selectedQuadrant,
+        }
+        setTasks([...tasks, matrixTask])
+        setNewTask("")
+      }
+    } catch (error) {
+      console.error('Error creating task:', error)
     }
-
-    setTasks([...tasks, task])
-    setNewTask("")
-
-    addHistoryEntry({
-      action: "create",
-      entityType: "matrixTask",
-      entityId: task.id,
-      details: {
-        description: `Created task "${task.title}" in Q${task.quadrant}`,
-        to: { task },
-      },
-    })
   }
 
-  const toggleTask = (id: string) => {
-    setTasks(
-      tasks.map((task) => {
-        if (task.id === id) {
-          const newCompleted = !task.completed
+  const toggleTask = async (id: string) => {
+    const task = tasks.find(t => t._id === id)
+    if (!task) return
 
-          addHistoryEntry({
-            action: "complete",
-            entityType: "matrixTask",
-            entityId: task.id,
-            details: {
-              description: `${newCompleted ? "Completed" : "Uncompleted"} matrix task: ${task.title}`,
-              from: { completed: task.completed },
-              to: { completed: newCompleted },
-            },
-          })
+    const newCompleted = !task.completed
 
-          return { ...task, completed: newCompleted }
-        }
-        return task
-      }),
-    )
+    try {
+      const response = await fetch(`/api/tasks/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          completed: newCompleted
+        }),
+      })
+
+      if (response.ok) {
+        setTasks(
+          tasks.map((t) => {
+            if (t._id === id) {
+              return { ...t, completed: newCompleted }
+            }
+            return t
+          }),
+        )
+      }
+    } catch (error) {
+      console.error('Error updating task:', error)
+    }
   }
 
-  const moveTask = (taskId: string, newQuadrant: 1 | 2 | 3 | 4) => {
-    setTasks(
-      tasks.map((task) => {
-        if (task.id === taskId) {
-          const oldQuadrant = task.quadrant
+  const moveTask = async (taskId: string, newQuadrant: 1 | 2 | 3 | 4) => {
+    const task = tasks.find(t => t._id === taskId)
+    if (!task) return
 
-          addHistoryEntry({
-            action: "move",
-            entityType: "matrixTask",
-            entityId: task.id,
-            details: {
-              description: `Moved task "${task.title}" from Q${oldQuadrant} to Q${newQuadrant}`,
-              from: { quadrant: oldQuadrant },
-              to: { quadrant: newQuadrant },
-            },
-          })
+    const newEisenhowerCategory = getCategoryFromQuadrant(newQuadrant)
 
-          return { ...task, quadrant: newQuadrant }
-        }
-        return task
-      }),
-    )
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          eisenhowerCategory: newEisenhowerCategory
+        }),
+      })
+
+      if (response.ok) {
+        setTasks(
+          tasks.map((t) => {
+            if (t._id === taskId) {
+              return { ...t, quadrant: newQuadrant, eisenhowerCategory: newEisenhowerCategory as EisenhowerCategory }
+            }
+            return t
+          }),
+        )
+      }
+    } catch (error) {
+      console.error('Error moving task:', error)
+    }
   }
 
   const handleQuadrantDrop = (quadrant: 1 | 2 | 3 | 4) => {
@@ -273,25 +321,25 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
               </CardHeader>
               <CardContent className="space-y-3">
                 {quadrantTasks.map((task, taskIndex) => {
-                  const isDragging = draggedItem?.data?.id === task.id
+                  const isDragging = draggedItem?.data?.id === task._id
 
                   return (
                     <div
-                      key={task.id}
+                      key={task._id}
                       className={cn(
                         "p-4 bg-background/60 backdrop-blur-sm rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-md premium-card",
                         task.completed ? "opacity-60 line-through" : "hover:scale-105",
                         isDragging && "drag-preview",
                       )}
                       style={{ animationDelay: `${taskIndex * 0.05}s` }}
-                      onClick={() => toggleTask(task.id)}
+                      onClick={() => toggleTask(task._id)}
                       draggable
                       onDragStart={(e) => {
                         e.stopPropagation()
                         handleDragStart({
-                          id: task.id,
+                          id: task._id,
                           type: "matrixTask",
-                          data: { id: task.id, task },
+                          data: { id: task._id, task },
                         })
                       }}
                       onDragEnd={handleDragEnd}
