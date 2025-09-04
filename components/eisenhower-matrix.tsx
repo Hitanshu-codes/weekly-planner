@@ -445,16 +445,16 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-8 overflow-hidden">
       {/* Date Display and Selector */}
       <Card className="premium-card glow-border light-shadow animate-scale-in">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
+            <div className="flex items-center gap-2 sm:gap-3">
               <button
                 onClick={handleCalendarClick}
                 className={cn(
-                  "date-picker-container p-2 rounded-lg transition-colors cursor-pointer group",
+                  "date-picker-container p-2 rounded-lg transition-colors cursor-pointer group flex-shrink-0",
                   showDatePicker
                     ? "bg-primary/20 border-2 border-primary/30"
                     : "bg-primary/10 hover:bg-primary/20"
@@ -462,46 +462,45 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                 title="Click to select date"
               >
                 <Calendar className={cn(
-                  "h-5 w-5 transition-colors",
+                  "h-4 w-4 sm:h-5 sm:w-5 transition-colors",
                   showDatePicker
                     ? "text-primary"
                     : "text-primary group-hover:text-primary/80"
                 )} />
               </button>
-              <div>
-                <h3 className="font-semibold text-lg">
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <h3 className="font-semibold text-base sm:text-lg truncate">
                   {displayDate.toDateString() === new Date().toDateString() ? "Today's Tasks" : "Scheduled Tasks"}
                 </h3>
-                <p className="text-sm text-muted-foreground">
-                  Showing tasks scheduled for {displayDate.toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
+                <p className="text-xs sm:text-sm text-muted-foreground leading-tight break-words">
+                  Showing tasks for {displayDate.toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    month: 'short',
                     day: 'numeric'
                   })} (4 AM - 2 AM cycle)
                   {displayDate.toDateString() !== new Date().toDateString() && (
-                    <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
-                      (No tasks for current day cycle - showing next available day)
+                    <span className="block sm:inline sm:ml-2 text-blue-600 dark:text-blue-400 font-medium">
+                      (Next available day)
                     </span>
                   )}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Current time: {currentTime.toLocaleTimeString('en-US', {
+                <p className="text-xs text-muted-foreground mt-1 break-words">
+                  {currentTime.toLocaleTimeString('en-US', {
                     hour: 'numeric',
                     minute: '2-digit',
                     hour12: true
-                  })} • Day cycle: {(() => {
+                  })} • {(() => {
                     const hour = currentTime.getHours()
                     if (hour >= 4 && hour < 24) return "Active day"
-                    if (hour >= 0 && hour < 2) return "Active day (overnight)"
-                    return "Transition period (2 AM - 4 AM)"
+                    if (hour >= 0 && hour < 2) return "Active day"
+                    return "Transition period"
                   })()}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-3 relative">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 relative">
               {showDatePicker && (
-                <div className="date-picker-container absolute top-full right-0 mt-2 z-50 bg-background border border-input rounded-lg shadow-lg p-4 min-w-[280px]">
+                <div className="date-picker-container absolute top-full right-0 mt-2 z-50 bg-background border border-input rounded-lg shadow-lg p-3 sm:p-4 min-w-[280px] max-w-[90vw] overflow-hidden">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="font-semibold text-sm">Select Date</h4>
@@ -562,7 +561,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                 </div>
               )}
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-muted-foreground">
+                <span className="text-xs sm:text-sm font-medium text-muted-foreground">
                   {displayDate.toLocaleDateString('en-US', {
                     weekday: 'short',
                     month: 'short',
@@ -578,10 +577,10 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                   Change Date
                 </Button>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {displayDate.toDateString() !== new Date().toDateString() && (
                   <>
-                    <Badge variant="secondary" className="text-sm bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                    <Badge variant="secondary" className="text-xs sm:text-sm bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
                       Next Available Day
                     </Badge>
                     <Button
@@ -598,7 +597,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                     </Button>
                   </>
                 )}
-                <Badge variant="outline" className="text-sm">
+                <Badge variant="outline" className="text-xs sm:text-sm">
                   {tasks.length} tasks
                 </Badge>
               </div>
@@ -608,40 +607,42 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
       </Card>
 
       {/* Add Task Form */}
-      <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+      {/* <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in">
+        <CardHeader className="pb-3 sm:pb-6">
+          <CardTitle className="text-lg sm:text-xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
             Add New Task
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex flex-col sm:flex-row gap-4">
+        <CardContent className="space-y-4 sm:space-y-6">
+          <div className="flex flex-col gap-3 sm:gap-4">
             <Input
               placeholder="Enter task description..."
               value={newTask}
               onChange={(e) => setNewTask(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && addTask()}
-              className="flex-1 h-12 text-base focus-ring premium-card"
+              className="flex-1 h-10 sm:h-12 text-sm sm:text-base focus-ring premium-card"
             />
-            <select
-              value={selectedQuadrant}
-              onChange={(e) => setSelectedQuadrant(Number(e.target.value) as 1 | 2 | 3 | 4)}
-              className="px-4 py-3 border border-input bg-background rounded-lg text-base focus-ring premium-card min-w-fit"
-            >
-              <option value={1}>Q1: Urgent + Important</option>
-              <option value={2}>Q2: Not Urgent + Important</option>
-              <option value={3}>Q3: Urgent + Not Important</option>
-              <option value={4}>Q4: Not Urgent + Not Important</option>
-            </select>
-            <Button onClick={addTask} className="btn-premium h-12 px-6 focus-ring">
-              <Plus className="h-5 w-5" />
-            </Button>
+            <div className="flex gap-3 sm:gap-4">
+              <select
+                value={selectedQuadrant}
+                onChange={(e) => setSelectedQuadrant(Number(e.target.value) as 1 | 2 | 3 | 4)}
+                className="flex-1 px-3 sm:px-4 py-2 sm:py-3 border border-input bg-background rounded-lg text-sm sm:text-base focus-ring premium-card"
+              >
+                <option value={1}>Q1: Urgent + Important</option>
+                <option value={2}>Q2: Not Urgent + Important</option>
+                <option value={3}>Q3: Urgent + Not Important</option>
+                <option value={4}>Q4: Not Urgent + Not Important</option>
+              </select>
+              <Button onClick={addTask} className="btn-premium h-10 sm:h-12 px-4 sm:px-6 focus-ring flex-shrink-0">
+                <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+              </Button>
+            </div>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
 
       {/* Eisenhower Matrix Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-fade-in">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4 lg:gap-6 animate-fade-in overflow-hidden">
         {([1, 2, 3, 4] as const).map((quadrant, index) => {
           const config = quadrantConfig[quadrant]
           const quadrantTasks = getTasksByQuadrant(quadrant)
@@ -652,7 +653,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
               key={quadrant}
               className={cn(
                 config.color,
-                "min-h-[400px] transition-all duration-300 premium-card glow-border light-shadow",
+                "min-h-[280px] sm:min-h-[320px] md:min-h-[380px] transition-all duration-300 premium-card glow-border light-shadow overflow-hidden",
                 isDragOver && "drop-zone-active scale-105",
               )}
               style={{ animationDelay: `${index * 0.1}s` }}
@@ -667,10 +668,10 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                 handleDragEnd()
               }}
             >
-              <CardHeader className="pb-4">
+              <CardHeader className="pb-2 sm:pb-4">
                 <CardTitle className="flex items-center justify-between">
                   <span className={cn(
-                    "text-lg font-bold",
+                    "text-sm sm:text-base md:text-lg font-bold",
                     quadrant === 1 && "bg-gradient-to-r from-red-600 to-red-800 bg-clip-text text-transparent",
                     quadrant === 2 && "bg-gradient-to-r from-green-600 to-green-800 bg-clip-text text-transparent",
                     quadrant === 3 && "bg-gradient-to-r from-yellow-600 to-orange-600 bg-clip-text text-transparent",
@@ -678,15 +679,15 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                   )}>
                     Q{quadrant}
                   </span>
-                  <Badge variant={config.badge as any} className="text-sm px-3 py-1">
+                  <Badge variant={config.badge as any} className="text-xs sm:text-sm px-2 sm:px-3 py-1">
                     {quadrantTasks.length}
                   </Badge>
                 </CardTitle>
-                <p className="text-sm text-muted-foreground font-medium">{config.title}</p>
-                {isDragOver && <p className="text-sm text-primary font-semibold animate-pulse">Drop task here</p>}
+                <p className="text-xs sm:text-sm text-muted-foreground font-medium leading-tight">{config.title}</p>
+                {isDragOver && <p className="text-xs sm:text-sm text-primary font-semibold animate-pulse">Drop task here</p>}
               </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-3 gap-3">
+              <CardContent className="p-2 sm:p-4 overflow-hidden">
+                <div className="flex flex-col sm:grid sm:grid-cols-3 gap-2 sm:gap-3 min-h-0">
                   {quadrantTasks.map((task, taskIndex) => {
                     const isDragging = draggedItem?.data?.id === task._id
 
@@ -694,7 +695,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                       <div
                         key={task._id}
                         className={cn(
-                          "p-3 bg-background/60 backdrop-blur-sm rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-md premium-card",
+                          "p-2 sm:p-3 bg-background/60 backdrop-blur-sm rounded-lg sm:rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-md premium-card overflow-hidden",
                           task.completed ? "opacity-60 line-through" : "hover:scale-105",
                           isDragging && "drag-preview",
                         )}
@@ -711,30 +712,30 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                         }}
                         onDragEnd={handleDragEnd}
                       >
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing transition-opacity hover:opacity-100 flex-shrink-0" />
-                            <span className="text-xs font-medium text-pretty line-clamp-2">{task.title}</span>
+                        <div className="space-y-1 sm:space-y-2 min-h-0">
+                          <div className="flex items-center gap-1 sm:gap-2 min-h-0">
+                            <GripVertical className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground cursor-grab active:cursor-grabbing transition-opacity hover:opacity-100 flex-shrink-0" />
+                            <span className="text-xs font-medium text-pretty line-clamp-2 leading-tight break-words min-w-0 flex-1">{task.title}</span>
                           </div>
 
                           {/* Task Details */}
                           {task.description && (
-                            <div className="ml-6">
-                              <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
+                            <div className="ml-4 sm:ml-6 min-h-0">
+                              <p className="text-xs text-muted-foreground line-clamp-1 sm:line-clamp-2 break-words">{task.description}</p>
                             </div>
                           )}
 
                           {/* Day and Time Info */}
                           {(task.day || task.time !== undefined) && (
-                            <div className="ml-6">
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <div className="ml-4 sm:ml-6 min-h-0">
+                              <div className="flex items-center gap-1 sm:gap-2 text-xs text-muted-foreground flex-wrap">
                                 {task.day && (
-                                  <span className="px-1.5 py-0.5 bg-primary/10 rounded text-primary font-medium">
+                                  <span className="px-1 sm:px-1.5 py-0.5 bg-primary/10 rounded text-primary font-medium text-xs whitespace-nowrap">
                                     {task.day}
                                   </span>
                                 )}
                                 {task.time !== undefined && (
-                                  <span className="px-1.5 py-0.5 bg-secondary/10 rounded text-secondary-foreground font-medium">
+                                  <span className="px-1 sm:px-1.5 py-0.5 bg-secondary/10 rounded text-secondary-foreground font-medium text-xs whitespace-nowrap">
                                     {task.time === 0 ? '12am' : task.time === 12 ? '12pm' : task.time > 12 ? `${task.time - 12}pm` : `${task.time}am`}
                                   </span>
                                 )}
@@ -747,7 +748,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                   })}
                 </div>
                 {quadrantTasks.length === 0 && (
-                  <div className="text-sm text-muted-foreground text-center py-12 animate-pulse">
+                  <div className="text-xs sm:text-sm text-muted-foreground text-center py-8 sm:py-12 animate-pulse">
                     {isDragOver ? "Drop task here" : "No tasks in this quadrant"}
                   </div>
                 )}
@@ -759,11 +760,11 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
 
       {/* Instructions */}
       <Card className="premium-card glow-border light-shadow bg-gradient-to-r from-primary/5 to-primary/10 animate-slide-up">
-        <CardContent className="p-6">
-          <h3 className="font-bold mb-4 text-lg bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+        <CardContent className="p-4 sm:p-6">
+          <h3 className="font-bold mb-3 sm:mb-4 text-base sm:text-lg bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
             Priority Matrix:
           </h3>
-          <ul className="text-sm text-muted-foreground space-y-2 leading-relaxed">
+          <ul className="text-xs sm:text-sm text-muted-foreground space-y-2 leading-relaxed">
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
               <strong>Click the calendar icon</strong> or "Change Date" button to select any date and view tasks for that day

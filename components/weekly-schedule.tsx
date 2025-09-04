@@ -1285,71 +1285,73 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
   return (
     <div className="space-y-8">
       {/* Schedule Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 animate-slide-up">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4 animate-slide-up">
         <Card className="premium-card glow-border light-shadow">
-          <CardContent className="p-6">
-            <div className="text-3xl font-bold text-primary gradient-text">
+          <CardContent className="p-3 sm:p-6">
+            <div className="text-2xl sm:text-3xl font-bold text-primary gradient-text">
               {timeSlots.filter((slot) => slot.task).length}
             </div>
-            <p className="text-sm text-muted-foreground mt-1">Scheduled Tasks</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Scheduled Tasks</p>
           </CardContent>
         </Card>
         <Card className="premium-card glow-border light-shadow">
-          <CardContent className="p-6">
-            <div className="text-3xl font-bold text-green-600">
+          <CardContent className="p-3 sm:p-6">
+            <div className="text-2xl sm:text-3xl font-bold text-green-600">
               {timeSlots.filter((slot) => slot.task?.completed).length}
             </div>
-            <p className="text-sm text-muted-foreground mt-1">Completed</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Completed</p>
           </CardContent>
         </Card>
         <Card className="premium-card glow-border light-shadow">
-          <CardContent className="p-6">
-            <div className="text-3xl font-bold text-red-600">
+          <CardContent className="p-3 sm:p-6">
+            <div className="text-2xl sm:text-3xl font-bold text-red-600">
               {timeSlots.filter((slot) => slot.task?.priority === "high").length}
             </div>
-            <p className="text-sm text-muted-foreground mt-1">High Priority</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">High Priority</p>
           </CardContent>
         </Card>
         <Card className="premium-card glow-border light-shadow">
-          <CardContent className="p-6">
-            <div className="text-3xl font-bold text-blue-600">{timeSlots.filter((slot) => slot.merged).length}</div>
-            <p className="text-sm text-muted-foreground mt-1">Merged Slots</p>
+          <CardContent className="p-3 sm:p-6">
+            <div className="text-2xl sm:text-3xl font-bold text-blue-600">{timeSlots.filter((slot) => slot.merged).length}</div>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Merged Slots</p>
           </CardContent>
         </Card>
         <Card className="premium-card glow-border light-shadow">
-          <CardContent className="p-6">
-            <div className="text-3xl font-bold text-purple-600">{timeSlots.filter((slot) => slot.task && !slot.task.completed).length}</div>
-            <p className="text-sm text-muted-foreground mt-1">Pending Tasks</p>
+          <CardContent className="p-3 sm:p-6">
+            <div className="text-2xl sm:text-3xl font-bold text-purple-600">{timeSlots.filter((slot) => slot.task && !slot.task.completed).length}</div>
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Pending Tasks</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
+        <h2 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
           Weekly Schedule
         </h2>
         {timeSlots.length > 0 && (
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             {!mergeSelection.isSelecting && (
               <Button
                 onClick={() => handleStartMergeSelection('')}
                 variant="outline"
                 size="sm"
-                className="btn-premium text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 border-blue-300 dark:border-blue-700"
+                className="btn-premium text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 border-blue-300 dark:border-blue-700 text-xs sm:text-sm"
               >
-                <Merge className="h-4 w-4 mr-2" />
-                Merge Multiple Slots
+                <Merge className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">Merge Multiple Slots</span>
+                <span className="sm:hidden">Merge Slots</span>
               </Button>
             )}
             <Button
               onClick={handleDeleteConfirm}
               variant="outline"
               size="sm"
-              className="btn-premium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 border-red-300 dark:border-red-700"
+              className="btn-premium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 border-red-300 dark:border-red-700 text-xs sm:text-sm"
             >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete Schedule
+              <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">Delete Schedule</span>
+              <span className="sm:hidden">Delete</span>
             </Button>
           </div>
         )}
@@ -1397,11 +1399,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
         </Card>
       )}
 
-      {/* Weekly Grid - 7 Rows for Days, Horizontal Scroll for Time */}
+      {/* Weekly Grid - Mobile Optimized */}
       <div className="w-full">
-        <div className="flex">
-          {/* Fixed Day Column */}
-          <div className="w-40 flex-shrink-0">
+        <div className="flex flex-col lg:flex-row">
+          {/* Fixed Day Column - Hidden on mobile, shown on large screens */}
+          <div className="hidden lg:block w-40 flex-shrink-0">
             {/* Day Header */}
             <div className="h-16 flex items-center justify-center mb-4">
               <span className="text-lg font-semibold text-muted-foreground">Day</span>
@@ -1429,7 +1431,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
           {/* Scrollable Time Columns */}
           <div className="flex-1 overflow-x-auto">
-            <div className="min-w-[2400px]">
+            <div className="min-w-[2400px] lg:min-w-[2400px]">
               {/* Time Headers Row */}
               <div className="flex items-center gap-1 mb-4">
                 {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour, hourIndex) => {
@@ -1439,7 +1441,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                   return (
                     <div key={hour} className="flex items-center">
                       {/* Time Header Card */}
-                      <div className="w-40 h-16 flex items-center justify-center bg-muted/30 rounded-xl border flex-shrink-0">
+                      <div className="w-32 sm:w-40 h-12 sm:h-16 flex items-center justify-center bg-muted/30 rounded-lg sm:rounded-xl border flex-shrink-0">
                         <span className="text-xs font-medium text-muted-foreground">
                           {hour === 0 ? '12am' : hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
                         </span>
@@ -1459,9 +1461,21 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
               {/* Time Slots Rows */}
               {days.map((day, dayIndex) => {
                 const daySlots = getSlotsByDay(day)
+                const taskCount = getTaskCountForDay(day)
 
                 return (
                   <div key={day} className="flex items-center gap-1 mb-4">
+                    {/* Mobile Day Indicator - Only visible on mobile */}
+                    <div className="lg:hidden w-20 sm:w-24 flex-shrink-0 mr-2">
+                      <div className="h-24 sm:h-32 flex flex-col items-center justify-center bg-primary/10 rounded-lg sm:rounded-xl border premium-card glow-border">
+                        <div className="text-xs sm:text-sm font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent text-center">
+                          {day.substring(0, 3)}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {taskCount}
+                        </div>
+                      </div>
+                    </div>
                     {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour, hourIndex) => {
                       const slot = daySlots.find(s => {
                         const slotHour = new Date(s.startTime).getHours()
@@ -1509,7 +1523,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                           {/* Time Slot Card */}
                           <div
                             className={cn(
-                              "w-40 h-32 border rounded-xl transition-all duration-200 cursor-pointer group relative flex-shrink-0",
+                              "w-32 sm:w-40 h-24 sm:h-32 border rounded-lg sm:rounded-xl transition-all duration-200 cursor-pointer group relative flex-shrink-0",
                               hasTask
                                 ? slot?.task?.completed
                                   ? "border-2 border-green-400 shadow-[0_0_0_2px_rgba(34,197,94,0.3)] dark:border-green-500 dark:shadow-[0_0_0_2px_rgba(34,197,94,0.4)]"
@@ -1568,7 +1582,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                             {/* Task Content */}
                             {hasTask && slot?.task ? (
                               <div
-                                className="p-2 h-full flex flex-col relative group"
+                                className="p-1 sm:p-2 h-full flex flex-col relative group"
                                 draggable
                                 onDragStart={(e) => {
                                   if (slot?.task) {
@@ -1583,11 +1597,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                 onDragEnd={handleDragEnd}
                               >
                                 {/* Action Buttons - Show on hover */}
-                                <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
+                                <div className="absolute top-0.5 right-0.5 sm:top-1 sm:right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-0.5 sm:gap-1">
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-5 w-5 p-0 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                                    className="h-4 w-4 sm:h-5 sm:w-5 p-0 hover:bg-blue-100 dark:hover:bg-blue-900/30"
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       if (slot?.task) {
@@ -1595,12 +1609,12 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                       }
                                     }}
                                   >
-                                    <Edit3 className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                                    <Edit3 className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-blue-600 dark:text-blue-400" />
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-5 w-5 p-0 hover:bg-red-100 dark:hover:bg-red-900/30"
+                                    className="h-4 w-4 sm:h-5 sm:w-5 p-0 hover:bg-red-100 dark:hover:bg-red-900/30"
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       if (slot?.task) {
@@ -1608,7 +1622,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                       }
                                     }}
                                   >
-                                    <X className="h-3 w-3 text-red-600 dark:text-red-400" />
+                                    <X className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-red-600 dark:text-red-400" />
                                   </Button>
                                 </div>
 
@@ -1626,7 +1640,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                 ) : (
                                   <>
                                     {/* Title Section */}
-                                    <div className="mb-1 pr-8">
+                                    <div className="mb-1 pr-6 sm:pr-8">
                                       <h4
                                         className={cn(
                                           "text-xs font-bold leading-tight text-pretty line-clamp-2 mb-1",
@@ -1675,7 +1689,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                             ) : (
                               <div className="flex items-center justify-center h-full relative group">
                                 {editingSlot === slot?._id ? (
-                                  <div className="p-2 w-full" onClick={(e) => e.stopPropagation()}>
+                                  <div className="p-1 sm:p-2 w-full" onClick={(e) => e.stopPropagation()}>
                                     <TaskEditForm
                                       taskData={newTaskData}
                                       onSave={(data) => {
@@ -1697,7 +1711,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 h-5 w-5 p-0 hover:bg-green-100 dark:hover:bg-green-900/30"
+                                      className="absolute top-0.5 right-0.5 sm:top-1 sm:right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 h-4 w-4 sm:h-5 sm:w-5 p-0 hover:bg-green-100 dark:hover:bg-green-900/30"
                                       onClick={(e) => {
                                         e.stopPropagation()
                                         if (slot) {
@@ -1705,7 +1719,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                         }
                                       }}
                                     >
-                                      <Edit3 className="h-3 w-3 text-green-600 dark:text-green-400" />
+                                      <Edit3 className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-green-600 dark:text-green-400" />
                                     </Button>
                                   </>
                                 )}
@@ -1722,7 +1736,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                               size="sm"
                               variant="ghost"
                               className={cn(
-                                "h-6 w-6 p-0 mx-1",
+                                "h-5 w-5 sm:h-6 sm:w-6 p-0 mx-0.5 sm:mx-1",
                                 canMerge || mergeSelection.isSelecting
                                   ? "hover:bg-primary/10 focus-ring cursor-pointer"
                                   : "opacity-30 cursor-not-allowed"
@@ -1741,7 +1755,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                 }
                               }}
                             >
-                              <Merge className="h-3 w-3" />
+                              <Merge className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                             </Button>
                           )}
                         </div>
@@ -1757,11 +1771,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
       {/* Instructions */}
       <Card className="premium-card glow-border light-shadow bg-gradient-to-r from-primary/5 to-primary/10">
-        <CardContent className="p-6">
-          <h3 className="font-bold mb-4 text-lg bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
+        <CardContent className="p-4 sm:p-6">
+          <h3 className="font-bold mb-3 sm:mb-4 text-base sm:text-lg bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
             How to use your schedule:
           </h3>
-          <ul className="text-sm text-muted-foreground space-y-2 leading-relaxed">
+          <ul className="text-xs sm:text-sm text-muted-foreground space-y-2 leading-relaxed">
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
               <strong>Drag and drop</strong> tasks between time slots to reschedule
