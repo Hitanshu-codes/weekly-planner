@@ -69,6 +69,7 @@ export interface ITask extends Document {
     eisenhowerCategory: EisenhowerCategory
     completed: boolean
     duration: number
+    scheduledDate: Date
     recurrence?: 'none' | 'daily' | 'weekly' | 'custom'
     tags?: string[]
     color?: string
@@ -122,6 +123,11 @@ const TaskSchema = new Schema<ITask>(
         },
         completed: { type: Boolean, default: false },
         duration: { type: Number, default: 1 },
+        scheduledDate: {
+            type: Date,
+            required: true,
+            default: Date.now
+        },
         recurrence: {
             type: String,
             enum: ['none', 'daily', 'weekly', 'custom'],
@@ -135,6 +141,7 @@ const TaskSchema = new Schema<ITask>(
 )
 
 TaskSchema.index({ userId: 1, completed: 1 })
+TaskSchema.index({ userId: 1, scheduledDate: 1 })
 
 /* -----------------------------
    TIME SLOT MODEL

@@ -18,6 +18,7 @@ interface Task {
   eisenhowerCategory?: "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important"
   completed: boolean
   duration: number // in hours
+  scheduledDate?: Date
 }
 
 interface TimeSlot {
@@ -47,16 +48,274 @@ const eisenhowerColors = {
   "not-urgent-not-important": "bg-gray-200 dark:bg-gray-900/40 border-gray-400 dark:border-gray-600",
 }
 
+// Helper function to get days to include in schedule (from today until Sunday)
+function getDaysToSchedule(): string[] {
+  const today = new Date()
+  const currentDay = today.getDay() // 0 = Sunday, 6 = Saturday
+  const allDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+  // If today is Sunday, include only Sunday
+  if (currentDay === 0) {
+    return ['Sunday']
+  }
+
+  // Otherwise, include from today until Sunday
+  const daysToInclude = []
+  for (let i = currentDay; i <= 6; i++) {
+    daysToInclude.push(allDays[i])
+  }
+
+  return daysToInclude
+}
+
 export function WeeklySchedule({ schedule }: ScheduleProps) {
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+  const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+  const days = getDaysToSchedule() // Only include relevant days
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [existingSchedule, setExistingSchedule] = useState<any>(null)
+  const [showWarning, setShowWarning] = useState(false)
 
   console.log("[WeeklySchedule] Component render - schedule:", schedule, "timeSlots.length:", timeSlots.length)
 
   const { draggedItem, dragOverTarget, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave } = useDragDrop()
+
+  // Check for existing schedule for current week
+  const checkExistingSchedule = async () => {
+    try {
+      const response = await fetch('/api/schedules', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      })
+      if (response.ok) {
+        const schedules = await response.json()
+        const currentWeekStart = new Date()
+        currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay() + 1) // Monday
+        currentWeekStart.setHours(0, 0, 0, 0)
+
+        const existingSchedule = schedules.find((schedule: any) => {
+          const scheduleWeekStart = new Date(schedule.weekStartDate)
+          scheduleWeekStart.setHours(0, 0, 0, 0)
+          return scheduleWeekStart.getTime() === currentWeekStart.getTime()
+        })
+
+        if (existingSchedule) {
+          setExistingSchedule(existingSchedule)
+          setShowWarning(true)
+          return existingSchedule
+        }
+      }
+    } catch (error) {
+      console.error('Error checking existing schedule:', error)
+    }
+    return null
+  }
+
+  // Clean up existing schedule data
+  const cleanupExistingSchedule = async (existingSchedule: any) => {
+    try {
+      // Delete existing time slots
+      if (existingSchedule.timeSlots && existingSchedule.timeSlots.length > 0) {
+        for (const timeSlotId of existingSchedule.timeSlots) {
+          await fetch(`/api/time-slots/${timeSlotId}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+            }
+          })
+        }
+      }
+
+      // Delete existing schedule
+      await fetch(`/api/schedules/${existingSchedule._id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      })
+
+      console.log('Existing schedule cleaned up successfully')
+    } catch (error) {
+      console.error('Error cleaning up existing schedule:', error)
+    }
+  }
+
+  // Handle user confirmation to proceed with new schedule
+  const handleProceedWithNewSchedule = async () => {
+    if (existingSchedule) {
+      await cleanupExistingSchedule(existingSchedule)
+    }
+    setShowWarning(false)
+    setExistingSchedule(null)
+    // Process the new schedule
+    await processNewSchedule()
+  }
+
+  // Process new schedule after cleanup
+  const processNewSchedule = async () => {
+    if (!schedule) return
+
+    try {
+      const slots: TimeSlot[] = []
+
+      for (const day of days) {
+        for (let hour = 8; hour <= 21; hour++) {
+          const slotId = `${day}-${hour}`
+
+          // Check if we already have this slot
+          const existingSlot = timeSlots.find((slot) => {
+            const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
+            const slotHour = new Date(slot.startTime).getHours()
+            return slotDay === day && slotHour === hour
+          })
+
+          if (existingSlot) {
+            slots.push(existingSlot)
+          } else {
+            let task: Task | undefined
+
+            // Parse schedule data if available
+            if (schedule[day]) {
+              const daySchedule = schedule[day]
+              const timeFormats = [
+                hour.toString(),
+                `${hour}:00`,
+                `${hour}am`,
+                `${hour}pm`,
+                `${hour}:00am`,
+                `${hour}:00pm`
+              ]
+
+              let taskData = null
+              for (const format of timeFormats) {
+                if (daySchedule[format]) {
+                  taskData = daySchedule[format]
+                  break
+                }
+              }
+
+              if (taskData) {
+                // Create task via API
+                // Calculate the scheduled date for this task
+                // Get the current date and find the actual calendar date for each day of the week
+                const today = new Date()
+                const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+
+                // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
+                const dayNameToNumber = {
+                  'Monday': 1,
+                  'Tuesday': 2,
+                  'Wednesday': 3,
+                  'Thursday': 4,
+                  'Friday': 5,
+                  'Saturday': 6,
+                  'Sunday': 0
+                }
+
+                const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
+
+                // Calculate how many days to add to get to the target day
+                let daysToAdd = targetDayNumber - currentDayOfWeek
+                if (daysToAdd <= 0) {
+                  daysToAdd += 7 // If the day has passed this week, go to next week
+                }
+
+                const dayDate = new Date(today)
+                dayDate.setDate(today.getDate() + daysToAdd)
+                dayDate.setHours(hour, 0, 0, 0)
+
+                const response = await fetch('/api/tasks', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+                  },
+                  body: JSON.stringify({
+                    title: taskData.title || taskData.task || "Generated Task",
+                    description: taskData.description || "",
+                    priority: taskData.priority || "medium",
+                    category: taskData.category || "General",
+                    eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
+                    duration: taskData.duration || 1,
+                    scheduledDate: dayDate.toISOString(),
+                  }),
+                })
+
+                if (response.ok) {
+                  task = await response.json()
+                }
+              }
+            }
+
+            // Create time slot via API
+            // Calculate the scheduled date for this time slot using the same logic
+            const today = new Date()
+            const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+
+            // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
+            const dayNameToNumber = {
+              'Monday': 1,
+              'Tuesday': 2,
+              'Wednesday': 3,
+              'Thursday': 4,
+              'Friday': 5,
+              'Saturday': 6,
+              'Sunday': 0
+            }
+
+            const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
+
+            // Calculate how many days to add to get to the target day
+            let daysToAdd = targetDayNumber - currentDayOfWeek
+            if (daysToAdd <= 0) {
+              daysToAdd += 7 // If the day has passed this week, go to next week
+            }
+
+            const dayDate = new Date(today)
+            dayDate.setDate(today.getDate() + daysToAdd)
+
+            const startTime = new Date(dayDate)
+            startTime.setHours(hour, 0, 0, 0)
+
+            const endTime = new Date(dayDate)
+            endTime.setHours(hour + 1, 0, 0, 0)
+
+            const slotResponse = await fetch('/api/time-slots', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+              },
+              body: JSON.stringify({
+                day: dayDate.toISOString(),
+                startTime: startTime.toISOString(),
+                endTime: endTime.toISOString(),
+                taskId: task?._id
+              }),
+            })
+
+            if (slotResponse.ok) {
+              const newSlot = await slotResponse.json()
+              slots.push(newSlot)
+            }
+          }
+        }
+      }
+
+      setTimeSlots(slots)
+    } catch (error) {
+      console.error('Error processing new schedule:', error)
+    }
+  }
+
+  // Handle user cancellation
+  const handleCancelNewSchedule = () => {
+    setShowWarning(false)
+    setExistingSchedule(null)
+  }
 
   // Fetch time slots from MongoDB
   useEffect(() => {
@@ -87,102 +346,16 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
     const processSchedule = async () => {
       try {
-        const slots: TimeSlot[] = []
+        // Check for existing schedule first
+        const existing = await checkExistingSchedule()
 
-        for (const day of days) {
-          for (let hour = 8; hour <= 21; hour++) {
-            const slotId = `${day}-${hour}`
-
-            // Check if we already have this slot
-            const existingSlot = timeSlots.find((slot) => {
-              const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
-              const slotHour = new Date(slot.startTime).getHours()
-              return slotDay === day && slotHour === hour
-            })
-
-            if (existingSlot) {
-              slots.push(existingSlot)
-            } else {
-              let task: Task | undefined
-
-              // Parse schedule data if available
-              if (schedule[day]) {
-                const daySchedule = schedule[day]
-                const timeFormats = [
-                  hour.toString(),
-                  `${hour}:00`,
-                  `${hour}am`,
-                  `${hour}pm`,
-                  `${hour}:00am`,
-                  `${hour}:00pm`
-                ]
-
-                let taskData = null
-                for (const format of timeFormats) {
-                  if (daySchedule[format]) {
-                    taskData = daySchedule[format]
-                    break
-                  }
-                }
-
-                if (taskData) {
-                  // Create task via API
-                  const response = await fetch('/api/tasks', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-                    },
-                    body: JSON.stringify({
-                      title: taskData.title || taskData.task || "Generated Task",
-                      description: taskData.description || "",
-                      priority: taskData.priority || "medium",
-                      category: taskData.category || "General",
-                      eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
-                      duration: taskData.duration || 1,
-                    }),
-                  })
-
-                  if (response.ok) {
-                    task = await response.json()
-                  }
-                }
-              }
-
-              // Create time slot via API
-              const dayDate = new Date()
-              const dayIndex = days.indexOf(day)
-              dayDate.setDate(dayDate.getDate() - dayDate.getDay() + dayIndex + 1) // Monday = 1
-
-              const startTime = new Date(dayDate)
-              startTime.setHours(hour, 0, 0, 0)
-
-              const endTime = new Date(dayDate)
-              endTime.setHours(hour + 1, 0, 0, 0)
-
-              const slotResponse = await fetch('/api/time-slots', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-                },
-                body: JSON.stringify({
-                  day: dayDate.toISOString(),
-                  startTime: startTime.toISOString(),
-                  endTime: endTime.toISOString(),
-                  taskId: task?._id
-                }),
-              })
-
-              if (slotResponse.ok) {
-                const newSlot = await slotResponse.json()
-                slots.push(newSlot)
-              }
-            }
-          }
+        if (existing) {
+          // Show warning and don't process new schedule
+          return
         }
 
-        setTimeSlots(slots)
+        // If no existing schedule, process normally
+        await processNewSchedule()
       } catch (error) {
         console.error('Error processing schedule:', error)
       }
@@ -409,6 +582,44 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
             </div>
             <div className="space-y-2">
               <p className="text-xl text-muted-foreground">Loading your schedule...</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Show warning if existing schedule found
+  if (showWarning && existingSchedule) {
+    return (
+      <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in">
+        <CardContent className="flex items-center justify-center py-16">
+          <div className="text-center space-y-6 animate-slide-up max-w-md">
+            <div className="p-4 rounded-full bg-yellow-100 dark:bg-yellow-900/30 mx-auto w-fit">
+              <Clock className="h-16 w-16 text-yellow-600 dark:text-yellow-400" />
+            </div>
+            <div className="space-y-4">
+              <h3 className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                Schedule Already Exists
+              </h3>
+              <p className="text-muted-foreground leading-relaxed">
+                You already have a schedule for this week. Creating a new schedule will replace your existing one and remove all current tasks and time slots.
+              </p>
+              <div className="flex gap-4 justify-center pt-4">
+                <Button
+                  onClick={handleProceedWithNewSchedule}
+                  className="btn-premium bg-red-600 hover:bg-red-700 text-white"
+                >
+                  Replace Schedule
+                </Button>
+                <Button
+                  onClick={handleCancelNewSchedule}
+                  variant="outline"
+                  className="btn-premium"
+                >
+                  Cancel
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>

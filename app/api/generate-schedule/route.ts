@@ -4,6 +4,36 @@ import { Task, TimeSlot, WeeklySchedule, HistoryEntry, User, EisenhowerCategory 
 import { Types } from "mongoose"
 import jwt from "jsonwebtoken"
 
+// Helper function to get upcoming Sunday
+function getUpcomingSunday(today: Date = new Date()): Date {
+  const day = today.getDay() // 0 = Sunday, 6 = Saturday
+  const diff = (7 - day) % 7 // days left until Sunday
+  const sunday = new Date(today)
+  sunday.setDate(today.getDate() + diff)
+  sunday.setHours(23, 59, 59, 999) // end of Sunday
+  return sunday
+}
+
+// Helper function to get days to include in schedule (from today until Sunday)
+function getDaysToSchedule(): string[] {
+  const today = new Date()
+  const currentDay = today.getDay() // 0 = Sunday, 6 = Saturday
+  const allDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+  // If today is Sunday, include only Sunday
+  if (currentDay === 0) {
+    return ['Sunday']
+  }
+
+  // Otherwise, include from today until Sunday
+  const daysToInclude = []
+  for (let i = currentDay; i <= 6; i++) {
+    daysToInclude.push(allDays[i])
+  }
+
+  return daysToInclude
+}
+
 export async function POST(request: NextRequest) {
   try {
     console.log("[API] Starting schedule generation request")
@@ -39,7 +69,13 @@ export async function POST(request: NextRequest) {
 
     console.log("[API] Gemini API key found, proceeding with request")
 
-    const prompt = `Create a detailed weekly schedule based on these goals: "${goals}". 
+    // Get the days to include in the schedule
+    const daysToSchedule = getDaysToSchedule()
+    console.log("[API] Days to schedule:", daysToSchedule)
+
+    const prompt = `Create a detailed schedule for the remaining days of this week based on these goals: "${goals}". 
+
+Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long' })} and you should only create tasks for: ${daysToSchedule.join(', ')}.
 
 For each task, you must categorize it using the Eisenhower Matrix:
 - "urgent-important": Critical tasks that need immediate attention (deadlines, emergencies, important meetings)
@@ -47,7 +83,7 @@ For each task, you must categorize it using the Eisenhower Matrix:
 - "not-urgent-important": Important tasks that aren't urgent (planning, skill development, relationship building, health)
 - "not-urgent-not-important": Tasks that are neither urgent nor important (time wasters, excessive social media, busy work)
 
-Return a JSON object with this exact structure:
+Return a JSON object with this exact structure (only include the days mentioned above):
 {
   "Monday": {
     "8": {"title": "Morning Routine", "description": "Exercise and breakfast", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
@@ -166,8 +202,11 @@ Guidelines:
       console.error("[API] Schedule creation failed, using fallback:", parseError)
       console.log("[API] Raw text that failed to parse:", generatedText)
 
-      // Create a comprehensive fallback schedule
-      schedule = {
+      // Create a comprehensive fallback schedule (only for relevant days)
+      const fallbackSchedule: any = {}
+
+      // Define all possible day schedules
+      const daySchedules = {
         Monday: {
           "8": {
             title: "Morning Routine",
@@ -337,6 +376,15 @@ Guidelines:
           },
         }
       }
+
+      // Only include days that are in our schedule
+      for (const day of daysToSchedule) {
+        if (daySchedules[day as keyof typeof daySchedules]) {
+          fallbackSchedule[day] = daySchedules[day as keyof typeof daySchedules]
+        }
+      }
+
+      schedule = fallbackSchedule
     }
 
     console.log("[API] Final schedule being returned:", schedule)
@@ -359,7 +407,13 @@ Guidelines:
       const createdTasks = []
       const createdTimeSlots = []
 
+      // Only process days that are in our schedule
       for (const [day, daySchedule] of Object.entries(schedule)) {
+        // Skip days that are not in our daysToSchedule list
+        if (!daysToSchedule.includes(day)) {
+          console.log(`[API] Skipping ${day} as it's not in the current schedule period`)
+          continue
+        }
         for (const [hour, taskData] of Object.entries(daySchedule as any)) {
           if (taskData && typeof taskData === 'object') {
             const task = taskData as any // Type assertion for task data
@@ -380,6 +434,36 @@ Guidelines:
             const validPriorities = ['high', 'medium', 'low']
             const normalizedPriority = validPriorities.includes(task.priority) ? task.priority : "medium"
 
+            // Calculate the scheduled date for this task
+            // Get the current date and find the actual calendar date for each day of the week
+            const today = new Date()
+            const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+
+            // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
+            const dayNameToNumber = {
+              'Monday': 1,
+              'Tuesday': 2,
+              'Wednesday': 3,
+              'Thursday': 4,
+              'Friday': 5,
+              'Saturday': 6,
+              'Sunday': 0
+            }
+
+            const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
+
+            // Calculate how many days to add to get to the target day
+            let daysToAdd = targetDayNumber - currentDayOfWeek
+            if (daysToAdd <= 0) {
+              daysToAdd += 7 // If the day has passed this week, go to next week
+            }
+
+            const dayDate = new Date(today)
+            dayDate.setDate(today.getDate() + daysToAdd)
+            dayDate.setHours(parseInt(hour), 0, 0, 0)
+
+            console.log(`[API] Creating task for ${day} ${hour}:00 - scheduledDate: ${dayDate.toISOString()}`)
+
             // Create task with new model structure
             const newTask = new Task({
               userId: user._id,
@@ -390,19 +474,14 @@ Guidelines:
               eisenhowerCategory: normalizedEisenhowerCategory,
               completed: false,
               duration: task.duration || 1,
+              scheduledDate: dayDate,
             })
 
             const savedTask = await newTask.save()
             createdTasks.push(savedTask)
 
             // Create time slot with new model structure
-            const dayDate = new Date(weekStartDate)
-            const dayIndex = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(day)
-            dayDate.setDate(dayDate.getDate() + dayIndex)
-
             const startTime = new Date(dayDate)
-            startTime.setHours(parseInt(hour), 0, 0, 0)
-
             const endTime = new Date(dayDate)
             endTime.setHours(parseInt(hour) + 1, 0, 0, 0)
 
@@ -435,13 +514,13 @@ Guidelines:
       // Create history entry
       const historyEntry = new HistoryEntry({
         userId: user._id,
-        scheduleId: savedSchedule._id,
+        scheduleId: savedSchedule._id as Types.ObjectId,
         action: "create",
         entityType: "task",
-        entityId: savedSchedule._id.toString(),
+        entityId: (savedSchedule._id as Types.ObjectId).toString(),
         details: {
           description: `Created weekly schedule with ${createdTasks.length} tasks based on goals: ${goals}`,
-          to: { scheduleId: savedSchedule._id, taskCount: createdTasks.length }
+          to: { scheduleId: savedSchedule._id as Types.ObjectId, taskCount: createdTasks.length }
         },
         performedBy: user._id
       })
@@ -453,8 +532,8 @@ Guidelines:
       // Return schedule with MongoDB IDs
       return NextResponse.json({
         ...schedule,
-        _id: savedSchedule._id,
-        scheduleId: savedSchedule._id.toString(),
+        _id: savedSchedule._id as Types.ObjectId,
+        scheduleId: (savedSchedule._id as Types.ObjectId).toString(),
         taskCount: createdTasks.length,
         savedAt: new Date().toISOString()
       })

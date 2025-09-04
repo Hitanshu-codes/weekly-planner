@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Plus, GripVertical } from "lucide-react"
+import { Plus, GripVertical, Calendar } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import { EisenhowerCategory } from "@/lib/models"
@@ -54,10 +54,44 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   const [newTask, setNewTask] = useState("")
   const [selectedQuadrant, setSelectedQuadrant] = useState<1 | 2 | 3 | 4>(1)
   const [loading, setLoading] = useState(true)
+  const [displayDate, setDisplayDate] = useState<Date>(new Date())
 
   const { draggedItem, dragOverTarget, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave } = useDragDrop()
 
-  // Fetch tasks from MongoDB
+  // Helper function to compare dates and determine if task is scheduled for a specific day
+  const isTaskForDate = (scheduledDate: string | Date, createdAt: string | Date, targetDate: Date): boolean => {
+    const taskDate = new Date(scheduledDate || createdAt)
+
+    // Convert both dates to YYYY-MM-DD format for comparison
+    const targetDateString = targetDate.toISOString().split('T')[0]
+    const taskDateString = taskDate.toISOString().split('T')[0]
+
+    return taskDateString === targetDateString
+  }
+
+  // Helper function to find the next available day with tasks
+  const findNextAvailableDay = (allTasks: any[]): Date => {
+    const today = new Date()
+
+    // Check up to 7 days ahead
+    for (let i = 0; i < 7; i++) {
+      const checkDate = new Date(today)
+      checkDate.setDate(today.getDate() + i)
+
+      const tasksForDay = allTasks.filter(task =>
+        isTaskForDate(task.scheduledDate, task.createdAt, checkDate)
+      )
+
+      if (tasksForDay.length > 0) {
+        return checkDate
+      }
+    }
+
+    // If no tasks found in the next 7 days, return today
+    return today
+  }
+
+  // Fetch tasks from MongoDB and filter for today only
   useEffect(() => {
     const fetchTasks = async () => {
       try {
@@ -68,8 +102,38 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         })
         if (response.ok) {
           const data = await response.json()
+
+          // Find the next available day with tasks
+          const availableDate = findNextAvailableDay(data)
+          setDisplayDate(availableDate)
+
+          // Filter tasks for the available date
+          const tasksForDate = data.filter((task: any) => {
+            const isForDate = isTaskForDate(task.scheduledDate, task.createdAt, availableDate)
+
+            console.log('Date comparison:', {
+              taskId: task._id,
+              taskTitle: task.title,
+              scheduledDate: task.scheduledDate,
+              createdAt: task.createdAt,
+              availableDate: availableDate.toISOString().split('T')[0],
+              isForDate
+            })
+
+            return isForDate
+          })
+
+          console.log('Filtering tasks for date:', {
+            availableDate: availableDate.toISOString(),
+            availableDateString: availableDate.toISOString().split('T')[0],
+            totalTasks: data.length,
+            tasksFound: tasksForDate.length
+          })
+
+          console.log('Tasks found for date:', tasksForDate.length)
+
           // Convert MongoDB tasks to matrix format
-          const matrixTasks = data.map((task: any) => ({
+          const matrixTasks = tasksForDate.map((task: any) => ({
             ...task,
             quadrant: getQuadrantFromCategory(task.eisenhowerCategory)
           }))
@@ -107,38 +171,18 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
     }
   }
 
-  // Get tasks from weekly schedule and convert to matrix format
-  const getScheduleTasks = (): Task[] => {
-    if (!schedule) return []
+  // Use only tasks from database (schedule tasks are now saved to database with proper scheduledDate)
+  const allTasks = tasks
 
-    const scheduleTasks: Task[] = []
-    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-
-    days.forEach((day) => {
-      if (schedule[day]) {
-        Object.entries(schedule[day]).forEach(([hour, taskData]: [string, any]) => {
-          if (taskData && typeof taskData === 'object' && taskData.eisenhowerCategory) {
-            scheduleTasks.push({
-              _id: `schedule-${day}-${hour}`,
-              uuid: `schedule-${day}-${hour}`,
-              title: taskData.title || "Generated Task",
-              description: taskData.description || "",
-              category: taskData.category || "General",
-              priority: taskData.priority || "medium",
-              eisenhowerCategory: taskData.eisenhowerCategory,
-              quadrant: getQuadrantFromCategory(taskData.eisenhowerCategory),
-              completed: false,
-            })
-          }
-        })
-      }
-    })
-
-    return scheduleTasks
-  }
-
-  // Combine manual tasks with schedule tasks
-  const allTasks = [...tasks, ...getScheduleTasks()]
+  console.log('Total tasks to display:', {
+    totalTasks: allTasks.length,
+    tasksByQuadrant: {
+      q1: allTasks.filter(t => t.quadrant === 1).length,
+      q2: allTasks.filter(t => t.quadrant === 2).length,
+      q3: allTasks.filter(t => t.quadrant === 3).length,
+      q4: allTasks.filter(t => t.quadrant === 4).length
+    }
+  })
 
   const addTask = async () => {
     if (!newTask.trim()) return
@@ -152,7 +196,8 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         },
         body: JSON.stringify({
           title: newTask,
-          eisenhowerCategory: getCategoryFromQuadrant(selectedQuadrant)
+          eisenhowerCategory: getCategoryFromQuadrant(selectedQuadrant),
+          scheduledDate: new Date().toISOString()
         }),
       })
 
@@ -247,6 +292,40 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
 
   return (
     <div className="space-y-8">
+      {/* Today's Date Display */}
+      <Card className="premium-card glow-border light-shadow animate-scale-in">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Calendar className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg">
+                  {displayDate.toDateString() === new Date().toDateString() ? "Today's Tasks" : "Upcoming Tasks"}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Showing tasks scheduled for {displayDate.toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                  {displayDate.toDateString() !== new Date().toDateString() && (
+                    <span className="ml-2 text-blue-600 dark:text-blue-400">
+                      (No tasks for today)
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <Badge variant="outline" className="text-sm">
+              {tasks.length} tasks
+            </Badge>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Add Task Form */}
       <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in">
         <CardHeader>
@@ -325,80 +404,49 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                 <p className="text-sm text-muted-foreground font-medium">{config.title}</p>
                 {isDragOver && <p className="text-sm text-primary font-semibold animate-pulse">Drop task here</p>}
               </CardHeader>
-              <CardContent className="space-y-3">
-                {quadrantTasks.map((task, taskIndex) => {
-                  const isDragging = draggedItem?.data?.id === task._id
+              <CardContent>
+                <div className="grid grid-cols-3 gap-3">
+                  {quadrantTasks.map((task, taskIndex) => {
+                    const isDragging = draggedItem?.data?.id === task._id
 
-                  return (
-                    <div
-                      key={task._id}
-                      className={cn(
-                        "p-4 bg-background/60 backdrop-blur-sm rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-md premium-card",
-                        task.completed ? "opacity-60 line-through" : "hover:scale-105",
-                        isDragging && "drag-preview",
-                      )}
-                      style={{ animationDelay: `${taskIndex * 0.05}s` }}
-                      onClick={() => toggleTask(task._id)}
-                      draggable
-                      onDragStart={(e) => {
-                        e.stopPropagation()
-                        handleDragStart({
-                          id: task._id,
-                          type: "matrixTask",
-                          data: { id: task._id, task },
-                        })
-                      }}
-                      onDragEnd={handleDragEnd}
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-3">
-                          <GripVertical className="h-5 w-5 text-muted-foreground cursor-grab active:cursor-grabbing transition-opacity hover:opacity-100" />
-                          <span className="text-sm flex-1 font-medium text-pretty">{task.title}</span>
-                        </div>
-
-                        {/* Task Details */}
-                        <div className="ml-8 space-y-1">
-                          {task.description && (
-                            <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
-                          )}
-
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {task.category && (
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "text-xs px-2 py-1",
-                                  task.category === "Work" && "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
-                                  task.category === "Health" && "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700",
-                                  task.category === "Personal" && "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700",
-                                  task.category === "Learning" && "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700",
-                                  task.category === "Family" && "bg-pink-100 text-pink-800 border-pink-300 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700",
-                                  task.category === "Break" && "bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-900/30 dark:text-gray-300 dark:border-gray-700"
-                                )}
-                              >
-                                {task.category}
-                              </Badge>
-                            )}
-
-                            {task.priority && (
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "text-xs px-2 py-1",
-                                  task.priority === "high" && "bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700",
-                                  task.priority === "medium" && "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700",
-                                  task.priority === "low" && "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700"
-                                )}
-                              >
-                                {task.priority}
-                              </Badge>
-                            )}
+                    return (
+                      <div
+                        key={task._id}
+                        className={cn(
+                          "p-3 bg-background/60 backdrop-blur-sm rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-md premium-card",
+                          task.completed ? "opacity-60 line-through" : "hover:scale-105",
+                          isDragging && "drag-preview",
+                        )}
+                        style={{ animationDelay: `${taskIndex * 0.05}s` }}
+                        onClick={() => toggleTask(task._id)}
+                        draggable
+                        onDragStart={(e) => {
+                          e.stopPropagation()
+                          handleDragStart({
+                            id: task._id,
+                            type: "matrixTask",
+                            data: { id: task._id, task },
+                          })
+                        }}
+                        onDragEnd={handleDragEnd}
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing transition-opacity hover:opacity-100 flex-shrink-0" />
+                            <span className="text-xs font-medium text-pretty line-clamp-2">{task.title}</span>
                           </div>
+
+                          {/* Task Details */}
+                          {task.description && (
+                            <div className="ml-6">
+                              <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
                 {quadrantTasks.length === 0 && (
                   <div className="text-sm text-muted-foreground text-center py-12 animate-pulse">
                     {isDragOver ? "Drop task here" : "No tasks in this quadrant"}
@@ -414,12 +462,12 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
       <Card className="premium-card glow-border light-shadow bg-gradient-to-r from-primary/5 to-primary/10 animate-slide-up">
         <CardContent className="p-6">
           <h3 className="font-bold mb-4 text-lg bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-            How to use the Priority Matrix:
+            Priority Matrix:
           </h3>
           <ul className="text-sm text-muted-foreground space-y-2 leading-relaxed">
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
-              <strong>Tasks from your AI schedule</strong> automatically appear in their assigned quadrants
+              <strong>Today's tasks</strong> are shown first, or the next available day with tasks
             </li>
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
