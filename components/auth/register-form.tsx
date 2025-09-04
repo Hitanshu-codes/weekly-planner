@@ -147,3 +147,4 @@ export function RegisterForm({ onRegister, onSwitchToLogin, loading, error }: Re
     )
 }
 
+

@@ -92,3 +92,4 @@ GEMINI_API_KEY=your-gemini-api-key-here
 
 All protected endpoints require the `Authorization: Bearer <token>` header.
 
+
