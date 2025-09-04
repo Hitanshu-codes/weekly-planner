@@ -410,9 +410,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
       })
 
       if (response.ok) {
+        console.log("[WeeklySchedule] Task completion updated successfully, new completed state:", newCompleted)
         setTimeSlots((slots) => {
           return slots.map((s) => {
             if (s._id === slotId && s.task) {
+              console.log("[WeeklySchedule] Updating slot:", s._id, "task completion to:", newCompleted)
               return { ...s, task: { ...s.task, completed: newCompleted } }
             }
             return s
@@ -853,7 +855,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                               "w-40 h-32 border rounded-xl transition-all duration-200 cursor-pointer group relative flex-shrink-0",
                               hasTask
                                 ? slot?.task?.completed
-                                  ? "bg-muted/50 opacity-75"
+                                  ? "border-2 border-green-400 shadow-[0_0_0_2px_rgba(34,197,94,0.3)] dark:border-green-500 dark:shadow-[0_0_0_2px_rgba(34,197,94,0.4)]"
                                   : slot?.task?.eisenhowerCategory
                                     ? eisenhowerColors[slot.task.eisenhowerCategory]
                                     : priorityColors[slot?.task?.priority || "medium"]
@@ -863,7 +865,22 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                               isDragging && "drag-preview",
                               "premium-card",
                             )}
-                            onClick={() => slot && setSelectedSlot(isSelected ? null : slot._id)}
+                            data-completed={slot?.task?.completed}
+                            data-task-id={slot?.task?._id}
+                            data-debug-classes={slot?.task?.completed ? "completed-green" : "not-completed"}
+                            onClick={() => {
+                              if (slot) {
+                                if (slot.task) {
+                                  // If card has a task, toggle completion
+                                  console.log("[WeeklySchedule] Toggling completion for slot:", slot._id, "task:", slot.task, "current completed:", slot.task.completed)
+                                  console.log("[WeeklySchedule] Current classes would be:", slot.task.completed ? "completed (should be green)" : "not completed")
+                                  toggleTaskCompletion(slot._id)
+                                } else {
+                                  // If card is empty, toggle selection
+                                  setSelectedSlot(isSelected ? null : slot._id)
+                                }
+                              }
+                            }}
                             onDragOver={(e) => {
                               e.preventDefault()
                               if (slot) {
@@ -941,23 +958,6 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                   </Badge>
                                 </div>
 
-                                {/* Action Buttons */}
-                                <div className="flex gap-1 mt-auto pt-1 border-t border-white/10">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-5 w-5 p-0 hover:bg-primary/10 focus-ring flex-1"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      if (slot?.task) {
-                                        console.log("[WeeklySchedule] Toggling completion for slot:", slot._id, "task:", slot.task)
-                                        toggleTaskCompletion(slot._id)
-                                      }
-                                    }}
-                                  >
-                                    <Check className="h-3 w-3" />
-                                  </Button>
-                                </div>
                               </div>
                             ) : (
                               <div className="flex items-center justify-center h-full">
