@@ -62,7 +62,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
   useEffect(() => {
     const fetchTimeSlots = async () => {
       try {
-        const response = await fetch('/api/time-slots?userId=default-user')
+        const response = await fetch('/api/time-slots', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
         if (response.ok) {
           const data = await response.json()
           setTimeSlots(data)
@@ -127,6 +131,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                     method: 'POST',
                     headers: {
                       'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
                     },
                     body: JSON.stringify({
                       title: taskData.title || taskData.task || "Generated Task",
@@ -135,7 +140,6 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                       category: taskData.category || "General",
                       eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
                       duration: taskData.duration || 1,
-                      userId: 'default-user'
                     }),
                   })
 
@@ -160,13 +164,13 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
                 },
                 body: JSON.stringify({
                   day: dayDate.toISOString(),
                   startTime: startTime.toISOString(),
                   endTime: endTime.toISOString(),
-                  taskId: task?._id,
-                  userId: 'default-user'
+                  taskId: task?._id
                 }),
               })
 
@@ -199,6 +203,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
         },
         body: JSON.stringify({
           completed: newCompleted
@@ -249,6 +254,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
             },
             body: JSON.stringify({
               endTime: newEndTime.toISOString(),
@@ -259,7 +265,10 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
           if (response.ok) {
             // Delete the next slot
             await fetch(`/api/time-slots/${nextSlot._id}`, {
-              method: 'DELETE'
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+              }
             })
 
             // Update local state
@@ -319,6 +328,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
         },
         body: JSON.stringify({
           task: sourceSlot.task._id
@@ -331,6 +341,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
           },
           body: JSON.stringify({
             task: null

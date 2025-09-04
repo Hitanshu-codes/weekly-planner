@@ -8,13 +8,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EisenhowerMatrix } from "@/components/eisenhower-matrix"
 import { WeeklySchedule } from "@/components/weekly-schedule"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { Calendar, Target, Sparkles } from "lucide-react"
+import { useAuth } from "@/components/auth/auth-provider"
+import { Calendar, Target, Sparkles, LogOut, User } from "lucide-react"
 
 export function WeeklyPlanner() {
   const [weeklyGoals, setWeeklyGoals] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedSchedule, setGeneratedSchedule] = useState(null)
   const [activeTab, setActiveTab] = useState("matrix")
+  const { user, logout } = useAuth()
 
   const generateSchedule = async () => {
     if (!weeklyGoals.trim()) return
@@ -24,8 +26,14 @@ export function WeeklyPlanner() {
     try {
       const response = await fetch("/api/generate-schedule", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goals: weeklyGoals }),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem('auth-token')}`
+        },
+        body: JSON.stringify({
+          goals: weeklyGoals,
+          userId: user?._id
+        }),
       })
 
       console.log("[WeeklyPlanner] API response status:", response.status)
@@ -63,7 +71,22 @@ export function WeeklyPlanner() {
             <p className="text-muted-foreground text-lg">Let AI organize your perfect week</p>
           </div>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
+            <User className="h-4 w-4 text-primary" />
+            <span className="text-sm font-medium text-primary">{user?.name}</span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={logout}
+            className="flex items-center gap-2 btn-premium focus-ring"
+          >
+            <LogOut className="h-4 w-4" />
+            Logout
+          </Button>
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* AI Schedule Generator */}

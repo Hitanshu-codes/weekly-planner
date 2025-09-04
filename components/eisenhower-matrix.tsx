@@ -61,7 +61,11 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   useEffect(() => {
     const fetchTasks = async () => {
       try {
-        const response = await fetch('/api/tasks?userId=default-user')
+        const response = await fetch('/api/tasks', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
         if (response.ok) {
           const data = await response.json()
           // Convert MongoDB tasks to matrix format
@@ -144,11 +148,11 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
         },
         body: JSON.stringify({
           title: newTask,
-          eisenhowerCategory: getCategoryFromQuadrant(selectedQuadrant),
-          userId: 'default-user'
+          eisenhowerCategory: getCategoryFromQuadrant(selectedQuadrant)
         }),
       })
 
@@ -177,6 +181,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
         },
         body: JSON.stringify({
           completed: newCompleted
@@ -209,6 +214,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
         },
         body: JSON.stringify({
           eisenhowerCategory: newEisenhowerCategory

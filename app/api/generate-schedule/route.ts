@@ -2,22 +2,28 @@ import { type NextRequest, NextResponse } from "next/server"
 import connectDB from "@/lib/mongodb"
 import { Task, TimeSlot, WeeklySchedule, HistoryEntry, User, EisenhowerCategory } from "@/lib/models"
 import { Types } from "mongoose"
+import jwt from "jsonwebtoken"
 
 export async function POST(request: NextRequest) {
   try {
     console.log("[API] Starting schedule generation request")
 
-    const { goals, userId } = await request.json()
-    console.log("[API] Received goals:", goals, "userId:", userId)
+    // Get user from JWT token
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 })
+    }
+
+    const token = authHeader.substring(7)
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key') as any
+
+    const { goals } = await request.json()
+    console.log("[API] Received goals:", goals, "userId:", decoded.userId)
 
     if (!goals) {
       console.log("[API] Error: No goals provided")
       return NextResponse.json({ error: "Goals are required" }, { status: 400 })
     }
-
-    // For now, use a default user if no userId provided
-    // In a real app, this would come from authentication
-    const currentUserId = userId || "default-user"
 
     // Check for Gemini API key
     const apiKey = process.env.GEMINI_API_KEY
@@ -340,25 +346,10 @@ Guidelines:
       await connectDB()
       console.log("[API] Connected to MongoDB")
 
-      // Get or create user
-      let user
-      if (currentUserId === "default-user") {
-        // Create a default user for demo purposes
-        user = await User.findOne({ email: "demo@example.com" })
-        if (!user) {
-          user = new User({
-            email: "demo@example.com",
-            passwordHash: "demo-hash",
-            name: "Demo User",
-            themePreference: "light"
-          })
-          await user.save()
-        }
-      } else {
-        user = await User.findById(currentUserId)
-        if (!user) {
-          return NextResponse.json({ error: "User not found" }, { status: 404 })
-        }
+      // Get user from database
+      const user = await User.findById(decoded.userId)
+      if (!user) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 })
       }
 
       const weekStartDate = new Date()
