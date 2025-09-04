@@ -1,0 +1,455 @@
+import { type NextRequest, NextResponse } from "next/server"
+import connectDB from "@/lib/mongodb"
+import { Task, TimeSlot, WeeklySchedule, HistoryEntry, EisenhowerCategory } from "@/lib/models"
+
+export async function POST(request: NextRequest) {
+  try {
+    console.log("[API] Starting schedule generation request")
+
+    const { goals } = await request.json()
+    console.log("[API] Received goals:", goals)
+
+    if (!goals) {
+      console.log("[API] Error: No goals provided")
+      return NextResponse.json({ error: "Goals are required" }, { status: 400 })
+    }
+
+    // Check for Gemini API key
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      console.log("[API] Error: No Gemini API key configured")
+      return NextResponse.json(
+        {
+          error: "Gemini API key not configured. Please add GEMINI_API_KEY to your environment variables.",
+        },
+        { status: 500 },
+      )
+    }
+
+    console.log("[API] Gemini API key found, proceeding with request")
+
+    const prompt = `Create a detailed weekly schedule based on these goals: "${goals}". 
+
+For each task, you must categorize it using the Eisenhower Matrix:
+- "urgent-important": Critical tasks that need immediate attention (deadlines, emergencies, important meetings)
+- "urgent-not-important": Tasks that feel urgent but aren't truly important (interruptions, some emails, non-critical requests)
+- "not-urgent-important": Important tasks that aren't urgent (planning, skill development, relationship building, health)
+- "not-urgent-not-important": Tasks that are neither urgent nor important (time wasters, excessive social media, busy work)
+
+Return a JSON object with this exact structure:
+{
+  "Monday": {
+    "8": {"title": "Morning Routine", "description": "Exercise and breakfast", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
+    "9": {"title": "Work Block 1", "description": "Focus on main project", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"},
+    "10": {"title": "Work Block 2", "description": "Meetings and emails", "priority": "medium", "category": "Work", "eisenhowerCategory": "urgent-not-important"}
+  },
+  "Tuesday": {
+    "8": {"title": "Exercise", "description": "Fitness routine", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
+    "10": {"title": "Learning", "description": "Skill development", "priority": "medium", "category": "Learning", "eisenhowerCategory": "not-urgent-important"}
+  },
+  "Wednesday": {
+    "8": {"title": "Morning Routine", "description": "Start your day right", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
+    "9": {"title": "Work Focus", "description": "Main project work", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"}
+  },
+  "Thursday": {
+    "8": {"title": "Exercise", "description": "Fitness routine", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
+    "10": {"title": "Learning", "description": "Skill development", "priority": "medium", "category": "Learning", "eisenhowerCategory": "not-urgent-important"}
+  },
+  "Friday": {
+    "8": {"title": "Morning Routine", "description": "Start your day right", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
+    "9": {"title": "Work Focus", "description": "Main project work", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"}
+  },
+  "Saturday": {
+    "10": {"title": "Family Time", "description": "Spend quality time with family", "priority": "medium", "category": "Family", "eisenhowerCategory": "not-urgent-important"},
+    "14": {"title": "Personal Project", "description": "Work on hobbies or personal interests", "priority": "low", "category": "Personal", "eisenhowerCategory": "not-urgent-not-important"}
+  },
+  "Sunday": {
+    "10": {"title": "Rest and Planning", "description": "Plan for next week and rest", "priority": "medium", "category": "Personal", "eisenhowerCategory": "not-urgent-important"},
+    "16": {"title": "Preparation", "description": "Prepare for the week ahead", "priority": "medium", "category": "Personal", "eisenhowerCategory": "not-urgent-important"}
+  }
+}
+
+Guidelines:
+- Use hours 8-22 (8am-10pm)
+- Include realistic breaks and meals
+- Balance work, personal, health, and learning activities
+- Set appropriate priorities: "high", "medium", "low"
+- Use categories like: "Work", "Health", "Personal", "Learning", "Family", "Break", "Education", "College", "Fitness", "Social", "Finance", "Hobby", "Travel", "Shopping", "Maintenance", "General"
+- CRITICAL: Assign eisenhowerCategory to each task based on urgency and importance
+- Make descriptions specific and actionable
+- Consider the user's stated goals and preferences
+- Return ONLY the JSON object, no additional text or markdown formatting
+- Ensure the JSON is valid and properly formatted`
+
+    console.log("[API] Sending prompt to Gemini API:", prompt)
+
+    // Call Gemini API
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: prompt }],
+            },
+          ],
+        }),
+      },
+    )
+
+    console.log("[API] Gemini API response status:", response.status)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error("[API] Gemini API error response:", errorText)
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`)
+    }
+
+    const data = await response.json()
+    console.log("[API] Gemini API raw response:", JSON.stringify(data, null, 2))
+
+    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text
+    console.log("[API] Extracted generated text:", generatedText)
+
+    if (!generatedText) {
+      console.error("[API] No content generated from Gemini API")
+      throw new Error("No content generated from Gemini API")
+    }
+
+    let schedule: any
+    try {
+      // Clean the response to extract JSON
+      const jsonMatch = generatedText.match(/\{[\s\S]*\}/)
+      console.log("[API] JSON regex match result:", jsonMatch)
+
+      if (jsonMatch) {
+        try {
+          schedule = JSON.parse(jsonMatch[0])
+          console.log("[API] Successfully parsed JSON schedule:", schedule)
+
+          // Validate the schedule structure
+          if (typeof schedule === "object" && schedule !== null) {
+            const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            const hasValidDays = days.some(day => schedule[day] && typeof schedule[day] === "object")
+
+            if (!hasValidDays) {
+              console.log("[API] Schedule doesn't have expected day structure, using fallback")
+              throw new Error("Invalid schedule structure")
+            }
+          } else {
+            throw new Error("Schedule is not an object")
+          }
+        } catch (parseError) {
+          console.error("[API] JSON parsing or validation failed:", parseError)
+          throw parseError
+        }
+      } else {
+        console.log("[API] No JSON match found, creating sample schedule")
+        throw new Error("No JSON content found")
+      }
+    } catch (parseError) {
+      console.error("[API] Schedule creation failed, using fallback:", parseError)
+      console.log("[API] Raw text that failed to parse:", generatedText)
+
+      // Create a comprehensive fallback schedule
+      schedule = {
+        Monday: {
+          "8": {
+            title: "Morning Routine",
+            description: "Start your day right with exercise and breakfast",
+            priority: "high",
+            category: "Health",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "9": {
+            title: "Work Focus",
+            description: "Main project work and planning",
+            priority: "high",
+            category: "Work",
+            eisenhowerCategory: "urgent-important"
+          },
+          "12": {
+            title: "Lunch Break",
+            description: "Healthy meal and rest",
+            priority: "medium",
+            category: "Break",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "14": {
+            title: "Afternoon Work",
+            description: "Continue with project tasks",
+            priority: "high",
+            category: "Work",
+            eisenhowerCategory: "urgent-important"
+          },
+        },
+        Tuesday: {
+          "8": {
+            title: "Exercise",
+            description: "Fitness routine and stretching",
+            priority: "high",
+            category: "Health",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "10": {
+            title: "Learning",
+            description: "Skill development and training",
+            priority: "medium",
+            category: "Learning",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "13": {
+            title: "Work Session",
+            description: "Focus on important tasks",
+            priority: "high",
+            category: "Work",
+            eisenhowerCategory: "urgent-important"
+          },
+        },
+        Wednesday: {
+          "8": {
+            title: "Morning Routine",
+            description: "Start your day with energy",
+            priority: "high",
+            category: "Health",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "9": {
+            title: "Team Meeting",
+            description: "Collaborate with team members",
+            priority: "medium",
+            category: "Work",
+            eisenhowerCategory: "urgent-not-important"
+          },
+          "11": {
+            title: "Deep Work",
+            description: "Focus on complex tasks",
+            priority: "high",
+            category: "Work",
+            eisenhowerCategory: "urgent-important"
+          },
+        },
+        Thursday: {
+          "8": {
+            title: "Exercise",
+            description: "Cardio and strength training",
+            priority: "high",
+            category: "Health",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "10": {
+            title: "Learning",
+            description: "Online course or reading",
+            priority: "medium",
+            category: "Learning",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "14": {
+            title: "Project Work",
+            description: "Continue with ongoing projects",
+            priority: "high",
+            category: "Work",
+            eisenhowerCategory: "urgent-important"
+          },
+        },
+        Friday: {
+          "8": {
+            title: "Morning Routine",
+            description: "Prepare for productive day",
+            priority: "high",
+            category: "Health",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "9": {
+            title: "Work Focus",
+            description: "Complete weekly objectives",
+            priority: "high",
+            category: "Work",
+            eisenhowerCategory: "urgent-important"
+          },
+          "16": {
+            title: "Week Review",
+            description: "Plan and organize for next week",
+            priority: "medium",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-important"
+          },
+        },
+        Saturday: {
+          "10": {
+            title: "Family Time",
+            description: "Spend quality time with family",
+            priority: "medium",
+            category: "Family",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "14": {
+            title: "Personal Project",
+            description: "Work on hobbies or interests",
+            priority: "low",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-not-important"
+          },
+          "18": {
+            title: "Relaxation",
+            description: "Unwind and recharge",
+            priority: "low",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-not-important"
+          },
+        },
+        Sunday: {
+          "10": {
+            title: "Rest and Planning",
+            description: "Plan for next week and rest",
+            priority: "medium",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "16": {
+            title: "Preparation",
+            description: "Prepare for the week ahead",
+            priority: "medium",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-important"
+          },
+          "20": {
+            title: "Evening Routine",
+            description: "Set up for successful week",
+            priority: "low",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-not-important"
+          },
+        }
+      }
+    }
+
+    console.log("[API] Final schedule being returned:", schedule)
+
+    // Connect to MongoDB and save the schedule
+    try {
+      await connectDB()
+      console.log("[API] Connected to MongoDB")
+
+      // Generate a unique schedule ID
+      const scheduleId = `schedule-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const userId = "default-user" // In a real app, this would come from authentication
+      const weekStartDate = new Date()
+
+      // Create tasks and time slots
+      const createdTasks = []
+      const createdTimeSlots = []
+
+      for (const [day, daySchedule] of Object.entries(schedule)) {
+        for (const [hour, taskData] of Object.entries(daySchedule as any)) {
+          if (taskData && typeof taskData === 'object') {
+            const task = taskData as any // Type assertion for task data
+
+            // Validate and normalize category
+            const validCategories = ['Work', 'Health', 'Personal', 'Learning', 'Family', 'Break', 'Education', 'College', 'Fitness', 'Social', 'Finance', 'Hobby', 'Travel', 'Shopping', 'Maintenance', 'General']
+            const normalizedCategory = validCategories.includes(task.category) ? task.category : "General"
+
+            if (task.category && !validCategories.includes(task.category)) {
+              console.log(`[API] Invalid category '${task.category}' normalized to 'General'`)
+            }
+
+            // Validate and normalize eisenhower category
+            const validEisenhowerCategories = ['urgent-important', 'urgent-not-important', 'not-urgent-important', 'not-urgent-not-important']
+            const normalizedEisenhowerCategory = validEisenhowerCategories.includes(task.eisenhowerCategory) ? task.eisenhowerCategory : "not-urgent-not-important"
+
+            // Validate and normalize priority
+            const validPriorities = ['high', 'medium', 'low']
+            const normalizedPriority = validPriorities.includes(task.priority) ? task.priority : "medium"
+
+            // Create task
+            const newTask = new Task({
+              id: `task-${scheduleId}-${day}-${hour}`,
+              title: task.title || "Generated Task",
+              description: task.description || "",
+              priority: normalizedPriority,
+              category: normalizedCategory,
+              eisenhowerCategory: normalizedEisenhowerCategory,
+              completed: false,
+              duration: task.duration || 1,
+            })
+
+            const savedTask = await newTask.save()
+            createdTasks.push(savedTask)
+
+            // Create time slot
+            const timeSlot = new TimeSlot({
+              id: `${day}-${hour}`,
+              day: day,
+              startHour: parseInt(hour),
+              endHour: parseInt(hour) + 1,
+              task: savedTask._id,
+              merged: false,
+            })
+
+            const savedTimeSlot = await timeSlot.save()
+            createdTimeSlots.push(savedTimeSlot)
+          }
+        }
+      }
+
+      // Create weekly schedule
+      const weeklySchedule = new WeeklySchedule({
+        userId: userId,
+        weekStartDate: weekStartDate,
+        goals: goals,
+        timeSlots: createdTimeSlots.map(ts => ts._id),
+        isActive: true,
+      })
+
+      const savedSchedule = await weeklySchedule.save()
+
+      // Create history entry
+      const historyEntry = new HistoryEntry({
+        userId: userId,
+        scheduleId: savedSchedule._id.toString(),
+        action: "create",
+        entityType: "task",
+        entityId: scheduleId,
+        details: {
+          description: `Created weekly schedule with ${createdTasks.length} tasks based on goals: ${goals}`,
+          to: { scheduleId: savedSchedule._id, taskCount: createdTasks.length }
+        }
+      })
+
+      await historyEntry.save()
+
+      console.log("[API] Schedule saved to MongoDB:", savedSchedule._id)
+
+      // Return schedule with MongoDB IDs
+      return NextResponse.json({
+        ...schedule,
+        _id: savedSchedule._id,
+        scheduleId: scheduleId,
+        taskCount: createdTasks.length,
+        savedAt: new Date().toISOString()
+      })
+
+    } catch (dbError) {
+      console.error("[API] MongoDB error:", dbError)
+      // Return schedule even if DB save fails
+      return NextResponse.json({
+        ...schedule,
+        error: "Schedule generated but not saved to database",
+        dbError: dbError instanceof Error ? dbError.message : "Unknown database error"
+      })
+    }
+  } catch (error) {
+    console.error("[API] Error generating schedule:", error)
+    return NextResponse.json(
+      {
+        error: "Failed to generate schedule. Please try again.",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
+  }
+}
