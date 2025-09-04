@@ -4,9 +4,10 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Clock, Check, Merge, GripVertical, History } from "lucide-react"
+import { Clock, Check, Merge, GripVertical, History, Trash2, Edit3, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useDragDrop } from "@/hooks/use-drag-drop"
+import { TaskEditForm } from "@/components/task-edit-form"
 
 interface Task {
   _id: string
@@ -18,7 +19,8 @@ interface Task {
   eisenhowerCategory?: "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important"
   completed: boolean
   duration: number // in hours
-  scheduledDate?: Date
+  day?: string // e.g., "Saturday"
+  time?: number // e.g., 22 (hour in 24-hour format)
 }
 
 interface TimeSlot {
@@ -77,6 +79,29 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
   const [loading, setLoading] = useState(true)
   const [existingSchedule, setExistingSchedule] = useState<any>(null)
   const [showWarning, setShowWarning] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [editingTask, setEditingTask] = useState<string | null>(null)
+  const [editingTaskData, setEditingTaskData] = useState<Partial<Task>>({})
+  const [showTaskDeleteConfirm, setShowTaskDeleteConfirm] = useState<string | null>(null)
+  const [editingSlot, setEditingSlot] = useState<string | null>(null)
+  const [newTaskData, setNewTaskData] = useState<Partial<Task>>({
+    title: "",
+    description: "",
+    priority: "medium",
+    category: "General",
+    eisenhowerCategory: "not-urgent-not-important",
+    duration: 1
+  })
+  const [mergeSelection, setMergeSelection] = useState<{
+    startSlotId: string | null
+    endSlotId: string | null
+    isSelecting: boolean
+  }>({
+    startSlotId: null,
+    endSlotId: null,
+    isSelecting: false
+  })
+  const [isProcessingSchedule, setIsProcessingSchedule] = useState(false)
 
   console.log("[WeeklySchedule] Component render - schedule:", schedule, "timeSlots.length:", timeSlots.length)
 
@@ -156,9 +181,31 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
   // Process new schedule after cleanup
   const processNewSchedule = async () => {
-    if (!schedule) return
+    if (!schedule || isProcessingSchedule) return
+
+    setIsProcessingSchedule(true)
+    console.log("[WeeklySchedule] Starting schedule processing...")
 
     try {
+      // Fetch all existing data once to avoid multiple API calls
+      const [existingTasksResponse, existingTimeSlotsResponse] = await Promise.all([
+        fetch('/api/tasks', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        }),
+        fetch('/api/time-slots', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+      ])
+
+      const existingTasks = existingTasksResponse.ok ? await existingTasksResponse.json() : []
+      const existingTimeSlots = existingTimeSlotsResponse.ok ? await existingTimeSlotsResponse.json() : []
+
+      console.log(`[WeeklySchedule] Found ${existingTasks.length} existing tasks and ${existingTimeSlots.length} existing time slots`)
+
       const slots: TimeSlot[] = []
 
       for (const day of days) {
@@ -169,7 +216,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
         for (const hour of hours) {
           const slotId = `${day}-${hour}`
 
-          // Check if we already have this slot
+          // Check if we already have this slot in current state
           const existingSlot = timeSlots.find((slot) => {
             const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
             const slotHour = new Date(slot.startTime).getHours()
@@ -214,126 +261,180 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
               }
 
               if (taskData) {
-                // Create task via API
-                // Calculate the scheduled date for this task
-                // Get the current date and find the actual calendar date for each day of the week
-                const today = new Date()
-                const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+                // Check if task already exists in database for this day and time
+                const existingTask = existingTasks.find((t: any) =>
+                  t.day === day &&
+                  t.time === hour &&
+                  t.title === (taskData.title || taskData.task || "Generated Task")
+                )
 
-                // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
-                const dayNameToNumber = {
-                  'Monday': 1,
-                  'Tuesday': 2,
-                  'Wednesday': 3,
-                  'Thursday': 4,
-                  'Friday': 5,
-                  'Saturday': 6,
-                  'Sunday': 0
-                }
+                if (existingTask) {
+                  console.log(`[WeeklySchedule] Using existing task for ${day} ${hour}:00:`, existingTask.title)
+                  task = existingTask
+                } else {
+                  // Create task via API
+                  // Calculate the scheduled date for this task
+                  // Get the current date and find the actual calendar date for each day of the week
+                  const today = new Date()
+                  const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 
-                const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
+                  // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
+                  const dayNameToNumber = {
+                    'Monday': 1,
+                    'Tuesday': 2,
+                    'Wednesday': 3,
+                    'Thursday': 4,
+                    'Friday': 5,
+                    'Saturday': 6,
+                    'Sunday': 0
+                  }
 
-                // Calculate how many days to add to get to the target day
-                let daysToAdd = targetDayNumber - currentDayOfWeek
-                if (daysToAdd <= 0) {
-                  daysToAdd += 7 // If the day has passed this week, go to next week
-                }
+                  const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
 
-                const dayDate = new Date(today)
-                dayDate.setDate(today.getDate() + daysToAdd)
-                dayDate.setHours(hour, 0, 0, 0)
+                  // Calculate how many days to add to get to the target day
+                  let daysToAdd = targetDayNumber - currentDayOfWeek
+                  if (daysToAdd <= 0) {
+                    daysToAdd += 7 // If the day has passed this week, go to next week
+                  }
 
-                const response = await fetch('/api/tasks', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-                  },
-                  body: JSON.stringify({
-                    title: taskData.title || taskData.task || "Generated Task",
-                    description: taskData.description || "",
-                    priority: taskData.priority || "medium",
-                    category: taskData.category || "General",
-                    eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
-                    duration: taskData.duration || 1,
-                    scheduledDate: dayDate.toISOString(),
-                  }),
-                })
+                  const dayDate = new Date(today)
+                  dayDate.setDate(today.getDate() + daysToAdd)
+                  dayDate.setHours(hour, 0, 0, 0)
 
-                if (response.ok) {
-                  task = await response.json()
+                  console.log(`[WeeklySchedule] Creating new task for ${day} ${hour}:00:`, taskData.title || taskData.task || "Generated Task")
+
+                  const response = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+                    },
+                    body: JSON.stringify({
+                      title: taskData.title || taskData.task || "Generated Task",
+                      description: taskData.description || "",
+                      priority: taskData.priority || "medium",
+                      category: taskData.category || "General",
+                      eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
+                      duration: taskData.duration || 1,
+                      day: day,
+                      time: hour,
+                    }),
+                  })
+
+                  if (response.ok) {
+                    task = await response.json()
+                    console.log(`[WeeklySchedule] Created new task:`, task?.title)
+                  }
                 }
               }
             }
 
-            // Always create time slot (for all 24 hours), with or without task
-            // Calculate the scheduled date for this time slot using the same logic
+            // Check if time slot already exists in database
+            // Calculate the expected start time for this slot
             const today = new Date()
-            const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-
-            // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
+            const currentDayOfWeek = today.getDay()
             const dayNameToNumber = {
-              'Monday': 1,
-              'Tuesday': 2,
-              'Wednesday': 3,
-              'Thursday': 4,
-              'Friday': 5,
-              'Saturday': 6,
-              'Sunday': 0
+              'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4,
+              'Friday': 5, 'Saturday': 6, 'Sunday': 0
             }
-
             const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
-
-            // Calculate how many days to add to get to the target day
             let daysToAdd = targetDayNumber - currentDayOfWeek
-            if (daysToAdd <= 0) {
-              daysToAdd += 7 // If the day has passed this week, go to next week
-            }
+            if (daysToAdd <= 0) daysToAdd += 7
 
             const dayDate = new Date(today)
             dayDate.setDate(today.getDate() + daysToAdd)
 
-            // Handle hours 0, 1, 2 which are on the next day
-            let actualHour = hour
             let actualDayDate = new Date(dayDate)
-
             if (hour === 0 || hour === 1 || hour === 2) {
-              // These hours are on the next day
               actualDayDate.setDate(dayDate.getDate() + 1)
             }
 
-            const startTime = new Date(actualDayDate)
-            startTime.setHours(actualHour, 0, 0, 0)
+            const expectedStartTime = new Date(actualDayDate)
+            expectedStartTime.setHours(hour, 0, 0, 0)
 
-            const endTime = new Date(actualDayDate)
-            endTime.setHours(actualHour + 1, 0, 0, 0)
-
-            const slotResponse = await fetch('/api/time-slots', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-              },
-              body: JSON.stringify({
-                day: dayDate.toISOString(),
-                startTime: startTime.toISOString(),
-                endTime: endTime.toISOString(),
-                taskId: task?._id || null // null if no task
-              }),
+            const existingTimeSlot = existingTimeSlots.find((ts: any) => {
+              const tsStartTime = new Date(ts.startTime)
+              return tsStartTime.getTime() === expectedStartTime.getTime()
             })
 
-            if (slotResponse.ok) {
-              const newSlot = await slotResponse.json()
-              console.log(`[WeeklySchedule] Created new slot for ${day} ${hour}:00 with task:`, newSlot.task ? newSlot.task.title : 'no task')
-              slots.push(newSlot)
+            if (existingTimeSlot) {
+              console.log(`[WeeklySchedule] Using existing time slot for ${day} ${hour}:00`)
+              slots.push(existingTimeSlot)
+            } else {
+              // Always create time slot (for all 24 hours), with or without task
+              // Calculate the scheduled date for this time slot using the same logic
+              const today = new Date()
+              const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+
+              // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
+              const dayNameToNumber = {
+                'Monday': 1,
+                'Tuesday': 2,
+                'Wednesday': 3,
+                'Thursday': 4,
+                'Friday': 5,
+                'Saturday': 6,
+                'Sunday': 0
+              }
+
+              const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
+
+              // Calculate how many days to add to get to the target day
+              let daysToAdd = targetDayNumber - currentDayOfWeek
+              if (daysToAdd <= 0) {
+                daysToAdd += 7 // If the day has passed this week, go to next week
+              }
+
+              const dayDate = new Date(today)
+              dayDate.setDate(today.getDate() + daysToAdd)
+
+              // Handle hours 0, 1, 2 which are on the next day
+              let actualHour = hour
+              let actualDayDate = new Date(dayDate)
+
+              if (hour === 0 || hour === 1 || hour === 2) {
+                // These hours are on the next day
+                actualDayDate.setDate(dayDate.getDate() + 1)
+              }
+
+              const startTime = new Date(actualDayDate)
+              startTime.setHours(actualHour, 0, 0, 0)
+
+              const endTime = new Date(actualDayDate)
+              endTime.setHours(actualHour + 1, 0, 0, 0)
+
+              console.log(`[WeeklySchedule] Creating new time slot for ${day} ${hour}:00`)
+
+              const slotResponse = await fetch('/api/time-slots', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+                },
+                body: JSON.stringify({
+                  day: dayDate.toISOString(),
+                  startTime: startTime.toISOString(),
+                  endTime: endTime.toISOString(),
+                  taskId: task?._id || null // null if no task
+                }),
+              })
+
+              if (slotResponse.ok) {
+                const newSlot = await slotResponse.json()
+                console.log(`[WeeklySchedule] Created new slot for ${day} ${hour}:00 with task:`, newSlot.task ? newSlot.task.title : 'no task')
+                slots.push(newSlot)
+              }
             }
           }
         }
       }
 
       setTimeSlots(slots)
+      console.log("[WeeklySchedule] Schedule processing completed successfully")
     } catch (error) {
       console.error('Error processing new schedule:', error)
+    } finally {
+      setIsProcessingSchedule(false)
     }
   }
 
@@ -341,6 +442,292 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
   const handleCancelNewSchedule = () => {
     setShowWarning(false)
     setExistingSchedule(null)
+  }
+
+  // Delete entire schedule
+  const deleteSchedule = async () => {
+    try {
+      // Delete all time slots
+      for (const slot of timeSlots) {
+        await fetch(`/api/time-slots/${slot._id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+      }
+
+      // Delete all tasks
+      const taskIds = timeSlots
+        .filter(slot => slot.task)
+        .map(slot => slot.task!._id)
+
+      for (const taskId of taskIds) {
+        await fetch(`/api/tasks/${taskId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+      }
+
+      // Delete the schedule record if it exists
+      if (existingSchedule) {
+        await fetch(`/api/schedules/${existingSchedule._id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+      }
+
+      // Clear local state
+      setTimeSlots([])
+      setExistingSchedule(null)
+      setShowDeleteConfirm(false)
+
+      console.log('Schedule deleted successfully')
+    } catch (error) {
+      console.error('Error deleting schedule:', error)
+    }
+  }
+
+  // Handle delete confirmation
+  const handleDeleteConfirm = () => {
+    setShowDeleteConfirm(true)
+  }
+
+  // Handle delete cancellation
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false)
+  }
+
+  // Handle task edit
+  const handleEditTask = (task: Task) => {
+    setEditingTask(task._id)
+    setEditingTaskData({
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      category: task.category,
+      eisenhowerCategory: task.eisenhowerCategory,
+      duration: task.duration
+    })
+  }
+
+  // Handle comprehensive task edit
+  const handleComprehensiveEdit = (task: Task) => {
+    setEditingTask(task._id)
+    setEditingTaskData({
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      category: task.category,
+      eisenhowerCategory: task.eisenhowerCategory,
+      duration: task.duration
+    })
+  }
+
+  // Handle task edit save
+  const handleSaveTaskEdit = async (taskData: Partial<Task>) => {
+    if (!editingTask || !taskData.title) return
+
+    try {
+      console.log('Updating task:', editingTask, 'with data:', taskData)
+
+      const response = await fetch(`/api/tasks/${editingTask}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        },
+        body: JSON.stringify(taskData),
+      })
+
+      if (response.ok) {
+        const updatedTask = await response.json()
+        console.log('Task updated successfully:', updatedTask)
+
+        // Update local state
+        setTimeSlots((slots) => {
+          return slots.map((slot) => {
+            if (slot.task && slot.task._id === editingTask) {
+              return { ...slot, task: updatedTask }
+            }
+            return slot
+          })
+        })
+
+        setEditingTask(null)
+        setEditingTaskData({})
+        console.log('Task updated successfully')
+      } else {
+        const errorData = await response.text()
+        console.error('Failed to update task:', errorData)
+      }
+    } catch (error) {
+      console.error('Error updating task:', error)
+    }
+  }
+
+  // Handle task edit cancel
+  const handleCancelTaskEdit = () => {
+    setEditingTask(null)
+    setEditingTaskData({})
+  }
+
+  // Handle task delete
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      // Delete the task
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      })
+
+      if (response.ok) {
+        // Update local state - remove task from slot
+        setTimeSlots((slots) => {
+          return slots.map((slot) => {
+            if (slot.task && slot.task._id === taskId) {
+              return { ...slot, task: undefined }
+            }
+            return slot
+          })
+        })
+
+        setShowTaskDeleteConfirm(null)
+        console.log('Task deleted successfully')
+      }
+    } catch (error) {
+      console.error('Error deleting task:', error)
+    }
+  }
+
+  // Handle creating new task in empty slot
+  const handleCreateTask = async (slotId: string, taskData: Partial<Task>) => {
+    console.log('handleCreateTask called with slotId:', slotId, 'taskData:', taskData)
+
+    if (!taskData.title?.trim()) {
+      console.log('Task title is required')
+      return
+    }
+
+    try {
+      const slot = timeSlots.find(s => s._id === slotId)
+      if (!slot) {
+        console.log('Slot not found')
+        return
+      }
+
+      console.log('Creating task for slot:', slotId, 'with data:', taskData)
+      console.log('Slot startTime:', slot.startTime, 'type:', typeof slot.startTime)
+
+      // Get day and time from slot
+      const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
+      const slotTime = new Date(slot.startTime).getHours()
+      console.log('Slot day:', slotDay, 'time:', slotTime)
+
+      // Create new task
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        },
+        body: JSON.stringify({
+          title: taskData.title.trim(),
+          description: taskData.description || "",
+          priority: taskData.priority || "medium",
+          category: taskData.category || "General",
+          eisenhowerCategory: taskData.eisenhowerCategory || "not-urgent-not-important",
+          duration: taskData.duration || 1,
+          day: slotDay,
+          time: slotTime,
+        }),
+      })
+
+      if (response.ok) {
+        const newTask = await response.json()
+        console.log('Task created successfully:', newTask)
+
+        // Update time slot with new task
+        const slotResponse = await fetch(`/api/time-slots/${slotId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          },
+          body: JSON.stringify({
+            task: newTask._id
+          }),
+        })
+
+        if (slotResponse.ok) {
+          const updatedSlot = await slotResponse.json()
+          console.log('Time slot updated successfully:', updatedSlot)
+
+          // Update local state
+          setTimeSlots((slots) => {
+            return slots.map((s) => {
+              if (s._id === slotId) {
+                return { ...s, task: newTask }
+              }
+              return s
+            })
+          })
+
+          setEditingSlot(null)
+          setNewTaskData({
+            title: "",
+            description: "",
+            priority: "medium" as const,
+            category: "General",
+            eisenhowerCategory: "not-urgent-not-important" as const,
+            duration: 1
+          })
+          console.log('New task created and associated with slot successfully')
+        } else {
+          console.error('Failed to update time slot:', await slotResponse.text())
+        }
+      } else {
+        const errorData = await response.text()
+        console.error('Failed to create task:', errorData)
+      }
+    } catch (error) {
+      console.error('Error creating task:', error)
+    }
+  }
+
+  // Handle starting edit for empty slot
+  const handleStartSlotEdit = (slotId: string) => {
+    console.log('Starting slot edit for:', slotId)
+    setEditingSlot(slotId)
+    const initialData = {
+      title: "",
+      description: "",
+      priority: "medium" as const,
+      category: "General",
+      eisenhowerCategory: "not-urgent-not-important" as const,
+      duration: 1
+    }
+    setNewTaskData(initialData)
+    console.log('Set newTaskData to:', initialData)
+  }
+
+  // Handle canceling slot edit
+  const handleCancelSlotEdit = () => {
+    setEditingSlot(null)
+    setNewTaskData({
+      title: "",
+      description: "",
+      priority: "medium" as const,
+      category: "General",
+      eisenhowerCategory: "not-urgent-not-important" as const,
+      duration: 1
+    })
   }
 
   // Fetch time slots from MongoDB
@@ -388,7 +775,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
     }
 
     processSchedule()
-  }, [schedule, loading])
+  }, [schedule]) // Removed 'loading' dependency to prevent multiple triggers
 
   const toggleTaskCompletion = async (slotId: string) => {
     console.log("[WeeklySchedule] toggleTaskCompletion called for slotId:", slotId)
@@ -426,51 +813,81 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
     }
   }
 
-  const mergeWithNext = async (currentSlotId: string, nextSlotId: string) => {
-    console.log("[WeeklySchedule] mergeWithNext called for currentSlotId:", currentSlotId, "nextSlotId:", nextSlotId)
+  // Enhanced merge function that can merge multiple consecutive slots
+  const mergeSlots = async (startSlotId: string, endSlotId: string) => {
+    console.log("[WeeklySchedule] mergeSlots called for startSlotId:", startSlotId, "endSlotId:", endSlotId)
 
-    const currentSlot = timeSlots.find(s => s._id === currentSlotId)
-    const nextSlot = timeSlots.find(s => s._id === nextSlotId)
+    const startSlot = timeSlots.find(s => s._id === startSlotId)
+    const endSlot = timeSlots.find(s => s._id === endSlotId)
 
-    if (!currentSlot || !nextSlot) {
-      console.log("[WeeklySchedule] One or both slots not found")
+    if (!startSlot || !endSlot) {
+      console.log("[WeeklySchedule] Start or end slot not found")
       return
     }
 
-    console.log("[WeeklySchedule] Current slot:", currentSlot, "Next slot:", nextSlot)
+    // Find all slots between start and end (inclusive) that are on the same day and consecutive
+    const startDay = new Date(startSlot.day).toDateString()
+    const endDay = new Date(endSlot.day).toDateString()
 
-    // Only merge if they're on the same day and consecutive hours
-    const currentDay = new Date(currentSlot.day).toDateString()
-    const nextDay = new Date(nextSlot.day).toDateString()
-    const currentEndHour = new Date(currentSlot.endTime).getHours()
-    const nextStartHour = new Date(nextSlot.startTime).getHours()
+    if (startDay !== endDay) {
+      console.log("[WeeklySchedule] Cannot merge slots across different days")
+      return
+    }
 
-    if (currentDay === nextDay && currentEndHour === nextStartHour) {
-      console.log("[WeeklySchedule] Merge conditions met - same day and consecutive hours")
+    // Get all slots for the same day
+    const daySlots = timeSlots.filter(slot => {
+      const slotDay = new Date(slot.day).toDateString()
+      return slotDay === startDay
+    }).sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
 
-      try {
-        // Determine which slot has a task (prioritize current slot)
-        const taskToKeep = currentSlot.task || nextSlot.task
-        const taskIdToKeep = taskToKeep?._id || null
+    // Find the range of slots to merge
+    const startIndex = daySlots.findIndex(slot => slot._id === startSlotId)
+    const endIndex = daySlots.findIndex(slot => slot._id === endSlotId)
 
-        // Update current slot to extend end time and include the task
-        const newEndTime = new Date(nextSlot.endTime)
-        const response = await fetch(`/api/time-slots/${currentSlot._id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
-          },
-          body: JSON.stringify({
-            endTime: newEndTime.toISOString(),
-            task: taskIdToKeep,
-            merged: true
-          }),
-        })
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
+      console.log("[WeeklySchedule] Invalid slot range")
+      return
+    }
 
-        if (response.ok) {
-          // Update next slot to have the same task and mark as merged
-          await fetch(`/api/time-slots/${nextSlot._id}`, {
+    const slotsToMerge = daySlots.slice(startIndex, endIndex + 1)
+
+    // Check if all slots are consecutive
+    for (let i = 0; i < slotsToMerge.length - 1; i++) {
+      const currentEndHour = new Date(slotsToMerge[i].endTime).getHours()
+      const nextStartHour = new Date(slotsToMerge[i + 1].startTime).getHours()
+
+      if (currentEndHour !== nextStartHour) {
+        console.log("[WeeklySchedule] Slots are not consecutive, cannot merge")
+        return
+      }
+    }
+
+    console.log("[WeeklySchedule] Merge conditions met - merging", slotsToMerge.length, "consecutive slots")
+
+    try {
+      // Determine which slot has a task (prioritize the first slot with a task)
+      const taskToKeep = slotsToMerge.find(slot => slot.task)?.task || null
+      const taskIdToKeep = taskToKeep?._id || null
+
+      // Update the first slot to extend end time to cover all merged slots
+      const newEndTime = new Date(slotsToMerge[slotsToMerge.length - 1].endTime)
+      const response = await fetch(`/api/time-slots/${startSlotId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        },
+        body: JSON.stringify({
+          endTime: newEndTime.toISOString(),
+          task: taskIdToKeep,
+          merged: true
+        }),
+      })
+
+      if (response.ok) {
+        // Update all other slots in the range to have the same task and mark as merged
+        const updatePromises = slotsToMerge.slice(1).map(slot =>
+          fetch(`/api/time-slots/${slot._id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -481,39 +898,114 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
               merged: true
             }),
           })
+        )
 
-          // Update local state - both slots now have the same task
-          setTimeSlots((slots) => {
-            return slots.map((slot) => {
-              if (slot._id === currentSlotId) {
-                return {
-                  ...slot,
-                  endTime: newEndTime,
-                  task: taskToKeep,
-                  merged: true,
-                }
-              } else if (slot._id === nextSlotId) {
-                return {
-                  ...slot,
-                  task: taskToKeep,
-                  merged: true,
-                }
+        await Promise.all(updatePromises)
+
+        // Update local state - all slots now have the same task
+        setTimeSlots((slots) => {
+          return slots.map((slot) => {
+            if (slotsToMerge.some(mergeSlot => mergeSlot._id === slot._id)) {
+              return {
+                ...slot,
+                task: taskToKeep || undefined, // Convert null to undefined for TypeScript compatibility
+                merged: true,
+                // Only the first slot gets the extended end time
+                endTime: slot._id === startSlotId ? newEndTime : slot.endTime
               }
-              return slot
-            })
+            }
+            return slot
           })
+        })
 
-          console.log("[WeeklySchedule] Merge completed successfully - both slots now have same content")
-        }
-      } catch (error) {
-        console.error('Error merging slots:', error)
+        console.log("[WeeklySchedule] Merge completed successfully -", slotsToMerge.length, "slots now have same content")
       }
-    } else {
-      console.log("[WeeklySchedule] Merge conditions not met:")
-      console.log("[WeeklySchedule] - Same day:", currentDay === nextDay)
-      console.log("[WeeklySchedule] - Consecutive hours:", currentEndHour === nextStartHour)
-      console.log("[WeeklySchedule] - Current endHour:", currentEndHour, "Next startHour:", nextStartHour)
+    } catch (error) {
+      console.error('Error merging slots:', error)
     }
+  }
+
+  // Legacy function for backward compatibility (merges only 2 slots)
+  const mergeWithNext = async (currentSlotId: string, nextSlotId: string) => {
+    await mergeSlots(currentSlotId, nextSlotId)
+  }
+
+  // Handle starting merge selection
+  const handleStartMergeSelection = (slotId: string) => {
+    setMergeSelection({
+      startSlotId: slotId,
+      endSlotId: slotId,
+      isSelecting: true
+    })
+  }
+
+  // Handle extending merge selection
+  const handleExtendMergeSelection = (slotId: string) => {
+    if (!mergeSelection.isSelecting || !mergeSelection.startSlotId) return
+
+    setMergeSelection(prev => ({
+      ...prev,
+      endSlotId: slotId
+    }))
+  }
+
+  // Handle completing merge selection
+  const handleCompleteMergeSelection = async () => {
+    if (!mergeSelection.startSlotId || !mergeSelection.endSlotId) return
+
+    await mergeSlots(mergeSelection.startSlotId, mergeSelection.endSlotId)
+    setMergeSelection({
+      startSlotId: null,
+      endSlotId: null,
+      isSelecting: false
+    })
+  }
+
+  // Handle canceling merge selection
+  const handleCancelMergeSelection = () => {
+    setMergeSelection({
+      startSlotId: null,
+      endSlotId: null,
+      isSelecting: false
+    })
+  }
+
+  // Check if a slot is in the merge selection range
+  const isSlotInMergeRange = (slotId: string) => {
+    if (!mergeSelection.isSelecting || !mergeSelection.startSlotId || !mergeSelection.endSlotId) {
+      return false
+    }
+
+    const startSlot = timeSlots.find(s => s._id === mergeSelection.startSlotId)
+    const endSlot = timeSlots.find(s => s._id === mergeSelection.endSlotId)
+    const currentSlot = timeSlots.find(s => s._id === slotId)
+
+    if (!startSlot || !endSlot || !currentSlot) return false
+
+    // Check if all slots are on the same day
+    const startDay = new Date(startSlot.day).toDateString()
+    const endDay = new Date(endSlot.day).toDateString()
+    const currentDay = new Date(currentSlot.day).toDateString()
+
+    if (startDay !== endDay || startDay !== currentDay) return false
+
+    // Get all slots for the same day and sort by time
+    const daySlots = timeSlots.filter(slot => {
+      const slotDay = new Date(slot.day).toDateString()
+      return slotDay === startDay
+    }).sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+
+    const startIndex = daySlots.findIndex(slot => slot._id === mergeSelection.startSlotId)
+    const endIndex = daySlots.findIndex(slot => slot._id === mergeSelection.endSlotId)
+    const currentIndex = daySlots.findIndex(slot => slot._id === slotId)
+
+    if (startIndex === -1 || endIndex === -1 || currentIndex === -1) return false
+
+    // Check if current slot is between start and end (inclusive)
+    const minIndex = Math.min(startIndex, endIndex)
+    const maxIndex = Math.max(startIndex, endIndex)
+
+    return currentIndex >= minIndex && currentIndex <= maxIndex
   }
 
   const handleTaskDrop = async (targetSlotId: string) => {
@@ -605,12 +1097,31 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
   const getSlotsByDay = (day: string) => {
     const daySlots = timeSlots.filter((slot) => {
-      const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
-      return slotDay === day
+      // Try multiple ways to get the day name to be more robust
+      const slotDayFromDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
+      const slotDayFromStartTime = new Date(slot.startTime).toLocaleDateString('en-US', { weekday: 'long' })
+
+      // Return true if either day matches
+      return slotDayFromDay === day || slotDayFromStartTime === day
     })
     console.log("[WeeklySchedule] getSlotsByDay for", day, ":", daySlots.length, "slots")
     console.log("[WeeklySchedule] Slots with tasks:", daySlots.filter(slot => slot.task).length)
     return daySlots
+  }
+
+  // Simple function to count tasks for a specific day
+  const getTaskCountForDay = (day: string) => {
+    const taskCount = timeSlots.filter((slot) => {
+      // Try multiple ways to get the day name to be more robust
+      const slotDayFromDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
+      const slotDayFromStartTime = new Date(slot.startTime).toLocaleDateString('en-US', { weekday: 'long' })
+
+      // Return true if either day matches AND slot has a task
+      return (slotDayFromDay === day || slotDayFromStartTime === day) && slot.task
+    }).length
+
+    console.log(`[WeeklySchedule] Task count for ${day}:`, taskCount)
+    return taskCount
   }
 
   console.log("[WeeklySchedule] Render - schedule:", schedule, "timeSlots.length:", timeSlots.length, "loading:", loading)
@@ -659,6 +1170,83 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                 </Button>
                 <Button
                   onClick={handleCancelNewSchedule}
+                  variant="outline"
+                  className="btn-premium"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Show delete confirmation modal
+  if (showDeleteConfirm) {
+    return (
+      <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in">
+        <CardContent className="flex items-center justify-center py-16">
+          <div className="text-center space-y-6 animate-slide-up max-w-md">
+            <div className="p-4 rounded-full bg-red-100 dark:bg-red-900/30 mx-auto w-fit">
+              <Trash2 className="h-16 w-16 text-red-600 dark:text-red-400" />
+            </div>
+            <div className="space-y-4">
+              <h3 className="text-2xl font-bold text-red-600 dark:text-red-400">
+                Delete Schedule?
+              </h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Are you sure you want to delete your entire weekly schedule? This will permanently remove all tasks and time slots. This action cannot be undone.
+              </p>
+              <div className="flex gap-4 justify-center pt-4">
+                <Button
+                  onClick={deleteSchedule}
+                  className="btn-premium bg-red-600 hover:bg-red-700 text-white"
+                >
+                  Yes, Delete Schedule
+                </Button>
+                <Button
+                  onClick={handleDeleteCancel}
+                  variant="outline"
+                  className="btn-premium"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Show task delete confirmation modal
+  if (showTaskDeleteConfirm) {
+    const taskToDelete = timeSlots.find(slot => slot.task?._id === showTaskDeleteConfirm)?.task
+    return (
+      <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in">
+        <CardContent className="flex items-center justify-center py-16">
+          <div className="text-center space-y-6 animate-slide-up max-w-md">
+            <div className="p-4 rounded-full bg-red-100 dark:bg-red-900/30 mx-auto w-fit">
+              <X className="h-16 w-16 text-red-600 dark:text-red-400" />
+            </div>
+            <div className="space-y-4">
+              <h3 className="text-2xl font-bold text-red-600 dark:text-red-400">
+                Delete Task?
+              </h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Are you sure you want to delete "{taskToDelete?.title}"? This action cannot be undone.
+              </p>
+              <div className="flex gap-4 justify-center pt-4">
+                <Button
+                  onClick={() => handleDeleteTask(showTaskDeleteConfirm)}
+                  className="btn-premium bg-red-600 hover:bg-red-700 text-white"
+                >
+                  Yes, Delete Task
+                </Button>
+                <Button
+                  onClick={() => setShowTaskDeleteConfirm(null)}
                   variant="outline"
                   className="btn-premium"
                 >
@@ -741,7 +1329,73 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
         <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
           Weekly Schedule
         </h2>
+        {timeSlots.length > 0 && (
+          <div className="flex gap-2">
+            {!mergeSelection.isSelecting && (
+              <Button
+                onClick={() => handleStartMergeSelection('')}
+                variant="outline"
+                size="sm"
+                className="btn-premium text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30 border-blue-300 dark:border-blue-700"
+              >
+                <Merge className="h-4 w-4 mr-2" />
+                Merge Multiple Slots
+              </Button>
+            )}
+            <Button
+              onClick={handleDeleteConfirm}
+              variant="outline"
+              size="sm"
+              className="btn-premium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 border-red-300 dark:border-red-700"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Schedule
+            </Button>
+          </div>
+        )}
       </div>
+
+      {/* Merge Selection Controls */}
+      {mergeSelection.isSelecting && (
+        <Card className="premium-card glow-border light-shadow bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/20 dark:to-purple-950/20">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                  <span className="text-sm font-medium">Start: {mergeSelection.startSlotId ? 'Selected' : 'Not selected'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-purple-500"></div>
+                  <span className="text-sm font-medium">End: {mergeSelection.endSlotId ? 'Selected' : 'Not selected'}</span>
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  Click on slots to select range, then click merge button to combine
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleCompleteMergeSelection}
+                  size="sm"
+                  className="btn-premium bg-green-600 hover:bg-green-700 text-white"
+                  disabled={!mergeSelection.startSlotId || !mergeSelection.endSlotId}
+                >
+                  <Merge className="h-4 w-4 mr-2" />
+                  Merge Slots
+                </Button>
+                <Button
+                  onClick={handleCancelMergeSelection}
+                  variant="outline"
+                  size="sm"
+                  className="btn-premium"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Weekly Grid - 7 Rows for Days, Horizontal Scroll for Time */}
       <div className="w-full">
@@ -755,8 +1409,8 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
             {/* Day Labels */}
             {days.map((day, dayIndex) => {
-              const daySlots = getSlotsByDay(day)
-              console.log("[WeeklySchedule] Rendering day row:", day, "with", daySlots.length, "slots")
+              const taskCount = getTaskCountForDay(day)
+              console.log("[WeeklySchedule] Rendering day row:", day, "with", taskCount, "tasks")
 
               return (
                 <div key={day} className="h-32 mb-4 flex items-center justify-center bg-primary/10 rounded-xl border premium-card glow-border w-full">
@@ -765,7 +1419,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                       {day}
                     </div>
                     <div className="text-sm text-muted-foreground mt-1">
-                      {daySlots.filter((slot) => slot.task).length} tasks
+                      {taskCount} tasks
                     </div>
                   </div>
                 </div>
@@ -846,6 +1500,9 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
                       const canMerge = nextSlot && slot && !slot.merged && !nextSlot.merged
                       const hasNextHour = nextHour !== undefined
+                      const isInMergeRange = isSlotInMergeRange(slot?._id || '')
+                      const isMergeStart = mergeSelection.startSlotId === slot?._id
+                      const isMergeEnd = mergeSelection.endSlotId === slot?._id
 
                       return (
                         <div key={`${day}-${hour}`} className="flex items-center">
@@ -863,6 +1520,9 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                               isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
                               isDragOver && "drop-zone-active",
                               isDragging && "drag-preview",
+                              isInMergeRange && "ring-2 ring-blue-400 ring-offset-2 ring-offset-background bg-blue-50/50 dark:bg-blue-950/20",
+                              isMergeStart && "ring-2 ring-green-400 ring-offset-2 ring-offset-background bg-green-50/50 dark:bg-green-950/20",
+                              isMergeEnd && "ring-2 ring-purple-400 ring-offset-2 ring-offset-background bg-purple-50/50 dark:bg-purple-950/20",
                               "premium-card",
                             )}
                             data-completed={slot?.task?.completed}
@@ -870,7 +1530,14 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                             data-debug-classes={slot?.task?.completed ? "completed-green" : "not-completed"}
                             onClick={() => {
                               if (slot) {
-                                if (slot.task) {
+                                if (mergeSelection.isSelecting) {
+                                  // Handle merge selection
+                                  if (!mergeSelection.startSlotId) {
+                                    handleStartMergeSelection(slot._id)
+                                  } else {
+                                    handleExtendMergeSelection(slot._id)
+                                  }
+                                } else if (slot.task) {
                                   // If card has a task, toggle completion
                                   console.log("[WeeklySchedule] Toggling completion for slot:", slot._id, "task:", slot.task, "current completed:", slot.task.completed)
                                   console.log("[WeeklySchedule] Current classes would be:", slot.task.completed ? "completed (should be green)" : "not completed")
@@ -901,7 +1568,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                             {/* Task Content */}
                             {hasTask && slot?.task ? (
                               <div
-                                className="p-2 h-full flex flex-col"
+                                className="p-2 h-full flex flex-col relative group"
                                 draggable
                                 onDragStart={(e) => {
                                   if (slot?.task) {
@@ -915,55 +1582,133 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                 }}
                                 onDragEnd={handleDragEnd}
                               >
-                                {/* Title Section */}
-                                <div className="mb-1">
-                                  <h4
-                                    className={cn(
-                                      "text-xs font-bold leading-tight text-pretty line-clamp-2 mb-1",
-                                      slot.task?.completed && "line-through opacity-60",
-                                      slot.task?.eisenhowerCategory === "urgent-important" && "text-red-700 dark:text-red-300",
-                                      slot.task?.eisenhowerCategory === "urgent-not-important" && "text-orange-700 dark:text-orange-300",
-                                      slot.task?.eisenhowerCategory === "not-urgent-important" && "text-blue-700 dark:text-blue-300",
-                                      slot.task?.eisenhowerCategory === "not-urgent-not-important" && "text-gray-700 dark:text-gray-300"
-                                    )}
+                                {/* Action Buttons - Show on hover */}
+                                <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-5 w-5 p-0 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      if (slot?.task) {
+                                        handleComprehensiveEdit(slot.task)
+                                      }
+                                    }}
                                   >
-                                    {slot.task?.title || "No Title"}
-                                  </h4>
+                                    <Edit3 className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-5 w-5 p-0 hover:bg-red-100 dark:hover:bg-red-900/30"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      if (slot?.task) {
+                                        setShowTaskDeleteConfirm(slot.task._id)
+                                      }
+                                    }}
+                                  >
+                                    <X className="h-3 w-3 text-red-600 dark:text-red-400" />
+                                  </Button>
                                 </div>
 
-                                {/* Description Section */}
-                                {slot.task?.description && (
-                                  <div className="mb-1 flex-1 min-h-0">
-                                    <p className="text-xs opacity-80 line-clamp-1 text-pretty leading-relaxed">
-                                      {slot.task.description}
-                                    </p>
+                                {/* Comprehensive Edit Mode */}
+                                {editingTask === slot.task._id ? (
+                                  <div className="p-2" onClick={(e) => e.stopPropagation()}>
+                                    <TaskEditForm
+                                      taskData={editingTaskData}
+                                      onSave={handleSaveTaskEdit}
+                                      onCancel={handleCancelTaskEdit}
+                                      isEditing={true}
+                                      saveButtonText="Save"
+                                    />
                                   </div>
+                                ) : (
+                                  <>
+                                    {/* Title Section */}
+                                    <div className="mb-1 pr-8">
+                                      <h4
+                                        className={cn(
+                                          "text-xs font-bold leading-tight text-pretty line-clamp-2 mb-1",
+                                          slot.task?.completed && "line-through opacity-60",
+                                          slot.task?.eisenhowerCategory === "urgent-important" && "text-red-700 dark:text-red-300",
+                                          slot.task?.eisenhowerCategory === "urgent-not-important" && "text-orange-700 dark:text-orange-300",
+                                          slot.task?.eisenhowerCategory === "not-urgent-important" && "text-blue-700 dark:text-blue-300",
+                                          slot.task?.eisenhowerCategory === "not-urgent-not-important" && "text-gray-700 dark:text-gray-300"
+                                        )}
+                                      >
+                                        {slot.task?.title || "No Title"}
+                                      </h4>
+                                    </div>
+
+                                    {/* Description Section */}
+                                    {slot.task?.description && (
+                                      <div className="mb-1 flex-1 min-h-0">
+                                        <p className="text-xs opacity-80 line-clamp-1 text-pretty leading-relaxed">
+                                          {slot.task.description}
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* Category Badge */}
+                                    <div className="mb-1">
+                                      <Badge
+                                        variant="outline"
+                                        className={cn(
+                                          "text-xs font-medium px-1 py-0.5 w-fit",
+                                          slot.task?.category === "Work" && "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
+                                          slot.task?.category === "Health" && "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700",
+                                          slot.task?.category === "Personal" && "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700",
+                                          slot.task?.category === "Learning" && "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700",
+                                          slot.task?.category === "Family" && "bg-pink-100 text-pink-800 border-pink-300 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700",
+                                          slot.task?.category === "Break" && "bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-900/30 dark:text-gray-300 dark:border-gray-700"
+                                        )}
+                                      >
+                                        {slot.task?.category || "General"}
+                                      </Badge>
+                                    </div>
+                                  </>
                                 )}
 
-                                {/* Category Badge */}
-                                <div className="mb-1">
-                                  <Badge
-                                    variant="outline"
-                                    className={cn(
-                                      "text-xs font-medium px-1 py-0.5 w-fit",
-                                      slot.task?.category === "Work" && "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
-                                      slot.task?.category === "Health" && "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700",
-                                      slot.task?.category === "Personal" && "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700",
-                                      slot.task?.category === "Learning" && "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700",
-                                      slot.task?.category === "Family" && "bg-pink-100 text-pink-800 border-pink-300 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700",
-                                      slot.task?.category === "Break" && "bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-900/30 dark:text-gray-300 dark:border-gray-700"
-                                    )}
-                                  >
-                                    {slot.task?.category || "General"}
-                                  </Badge>
-                                </div>
 
                               </div>
                             ) : (
-                              <div className="flex items-center justify-center h-full">
-                                <span className="text-xs text-muted-foreground">
-                                  {isDragOver ? "Drop here" : ""}
-                                </span>
+                              <div className="flex items-center justify-center h-full relative group">
+                                {editingSlot === slot?._id ? (
+                                  <div className="p-2 w-full" onClick={(e) => e.stopPropagation()}>
+                                    <TaskEditForm
+                                      taskData={newTaskData}
+                                      onSave={(data) => {
+                                        if (slot) {
+                                          handleCreateTask(slot._id, data)
+                                        }
+                                      }}
+                                      onCancel={handleCancelSlotEdit}
+                                      isEditing={false}
+                                      saveButtonText="Create"
+                                    />
+                                  </div>
+                                ) : (
+                                  <>
+                                    <span className="text-xs text-muted-foreground">
+                                      {isDragOver ? "Drop here" : ""}
+                                    </span>
+                                    {/* Add Task Button - Show on hover */}
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 h-5 w-5 p-0 hover:bg-green-100 dark:hover:bg-green-900/30"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (slot) {
+                                          handleStartSlotEdit(slot._id)
+                                        }
+                                      }}
+                                    >
+                                      <Edit3 className="h-3 w-3 text-green-600 dark:text-green-400" />
+                                    </Button>
+                                  </>
+                                )}
                               </div>
                             )}
 
@@ -978,16 +1723,21 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                               variant="ghost"
                               className={cn(
                                 "h-6 w-6 p-0 mx-1",
-                                canMerge
+                                canMerge || mergeSelection.isSelecting
                                   ? "hover:bg-primary/10 focus-ring cursor-pointer"
                                   : "opacity-30 cursor-not-allowed"
                               )}
-                              disabled={!canMerge}
+                              disabled={!canMerge && !mergeSelection.isSelecting}
                               onClick={(e) => {
                                 e.stopPropagation()
-                                if (canMerge) {
-                                  console.log("[WeeklySchedule] Merging slots:", slot._id, "and", nextSlot._id)
-                                  mergeWithNext(slot._id, nextSlot._id)
+                                if (mergeSelection.isSelecting) {
+                                  // Complete the merge selection
+                                  handleCompleteMergeSelection()
+                                } else if (canMerge) {
+                                  // Start merge selection with current and next slot
+                                  handleStartMergeSelection(slot._id)
+                                  handleExtendMergeSelection(nextSlot._id)
+                                  handleCompleteMergeSelection()
                                 }
                               }}
                             >
@@ -1018,15 +1768,23 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
             </li>
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
-              Click on any task to select it
+              Click on any task to mark it as complete
             </li>
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
-              Use the ✓ button to mark tasks as complete
+              <strong>Hover over tasks</strong> to see edit and delete buttons
             </li>
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
-              Use the merge button to combine adjacent time slots
+              <strong>Edit tasks</strong> to modify title, description, priority, and category
+            </li>
+            <li className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+              <strong>Hover over empty slots</strong> to create new tasks
+            </li>
+            <li className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+              Use the merge button to combine adjacent time slots, or click "Merge Multiple Slots" to select a range
             </li>
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>

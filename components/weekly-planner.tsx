@@ -16,6 +16,8 @@ export function WeeklyPlanner() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedSchedule, setGeneratedSchedule] = useState(null)
   const [activeTab, setActiveTab] = useState("matrix")
+  const [showReplaceDialog, setShowReplaceDialog] = useState(false)
+  const [pendingScheduleData, setPendingScheduleData] = useState<{ goals: string, existingScheduleId: string } | null>(null)
   const { user, logout } = useAuth()
 
   const generateSchedule = async () => {
@@ -48,6 +50,14 @@ export function WeeklyPlanner() {
       const schedule = await response.json()
       console.log("[WeeklyPlanner] Received schedule data:", schedule)
 
+      // Check if this is a warning about existing schedule
+      if (schedule.hasExistingSchedule) {
+        console.log("[WeeklyPlanner] Existing schedule detected, showing confirmation dialog")
+        setPendingScheduleData({ goals: weeklyGoals, existingScheduleId: schedule.existingScheduleId })
+        setShowReplaceDialog(true)
+        return
+      }
+
       setGeneratedSchedule(schedule)
       setActiveTab("schedule")
       console.log("[WeeklyPlanner] Schedule generated successfully, switching to schedule tab")
@@ -56,6 +66,53 @@ export function WeeklyPlanner() {
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const confirmReplaceSchedule = async () => {
+    if (!pendingScheduleData) return
+
+    console.log("[WeeklyPlanner] Confirming schedule replacement")
+    setIsGenerating(true)
+    setShowReplaceDialog(false)
+
+    try {
+      const response = await fetch("/api/generate-schedule", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${localStorage.getItem('auth-token')}`
+        },
+        body: JSON.stringify({
+          goals: pendingScheduleData.goals,
+          userId: user?._id,
+          replaceExisting: true,
+          existingScheduleId: pendingScheduleData.existingScheduleId
+        }),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("[WeeklyPlanner] API error response:", errorText)
+        throw new Error(`Failed to replace schedule: ${response.status} - ${errorText}`)
+      }
+
+      const schedule = await response.json()
+      console.log("[WeeklyPlanner] Schedule replaced successfully:", schedule)
+
+      setGeneratedSchedule(schedule)
+      setActiveTab("schedule")
+      setPendingScheduleData(null)
+    } catch (error) {
+      console.error("[WeeklyPlanner] Error replacing schedule:", error)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const cancelReplaceSchedule = () => {
+    setShowReplaceDialog(false)
+    setPendingScheduleData(null)
+    setIsGenerating(false)
   }
 
   return (
@@ -150,6 +207,45 @@ export function WeeklyPlanner() {
           <WeeklySchedule schedule={generatedSchedule} />
         </TabsContent>
       </Tabs>
+
+      {/* Replace Schedule Confirmation Dialog */}
+      {showReplaceDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fade-in">
+          <Card className="w-full max-w-md mx-4 premium-card glow-border-strong">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3 text-xl text-orange-600 dark:text-orange-400">
+                <Target className="h-6 w-6" />
+                Replace Existing Schedule?
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-muted-foreground">
+                A schedule already exists for this week. Replacing it will remove all current tasks and time slots.
+              </p>
+              <p className="text-sm font-medium">
+                Are you sure you want to continue?
+              </p>
+              <div className="flex gap-3 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={cancelReplaceSchedule}
+                  disabled={isGenerating}
+                  className="btn-premium"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmReplaceSchedule}
+                  disabled={isGenerating}
+                  className="btn-premium bg-orange-600 hover:bg-orange-700 text-white"
+                >
+                  {isGenerating ? "Replacing..." : "Replace Schedule"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

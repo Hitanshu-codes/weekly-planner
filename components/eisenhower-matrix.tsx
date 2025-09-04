@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Plus, GripVertical, Calendar } from "lucide-react"
+import { Plus, GripVertical, Calendar, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import { EisenhowerCategory } from "@/lib/models"
@@ -20,6 +20,8 @@ interface Task {
   category?: string
   priority?: "high" | "medium" | "low"
   eisenhowerCategory?: "urgent-important" | "urgent-not-important" | "not-urgent-important" | "not-urgent-not-important"
+  day?: string // e.g., "Saturday"
+  time?: number // e.g., 22 (hour in 24-hour format)
 }
 
 const quadrantConfig = {
@@ -55,40 +57,130 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   const [selectedQuadrant, setSelectedQuadrant] = useState<1 | 2 | 3 | 4>(1)
   const [loading, setLoading] = useState(true)
   const [displayDate, setDisplayDate] = useState<Date>(new Date())
+  const [currentTime, setCurrentTime] = useState<Date>(new Date())
+  const [showDatePicker, setShowDatePicker] = useState(false)
 
   const { draggedItem, dragOverTarget, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave } = useDragDrop()
 
-  // Helper function to compare dates and determine if task is scheduled for a specific day
-  const isTaskForDate = (scheduledDate: string | Date, createdAt: string | Date, targetDate: Date): boolean => {
-    const taskDate = new Date(scheduledDate || createdAt)
+  // Helper function to compare dates using custom day format (4 AM to 2 AM next day)
+  const isTaskForDate = (taskDay: string, targetDate: Date): boolean => {
+    // Get the day name from the target date directly
+    const targetDayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' })
 
-    // Convert both dates to YYYY-MM-DD format for comparison
-    const targetDateString = targetDate.toISOString().split('T')[0]
-    const taskDateString = taskDate.toISOString().split('T')[0]
+    console.log('Day comparison (4 AM to 2 AM cycle):', {
+      taskDay: taskDay,
+      targetDayName: targetDayName,
+      targetDate: targetDate.toDateString(),
+      match: taskDay === targetDayName
+    })
 
-    return taskDateString === targetDateString
+    return taskDay === targetDayName
   }
 
-  // Helper function to find the next available day with tasks
+  // Helper function to find the next available day with tasks (using 4 AM to 2 AM cycle)
   const findNextAvailableDay = (allTasks: any[]): Date => {
-    const today = new Date()
+    const now = new Date()
+    const currentHour = now.getHours()
 
-    // Check up to 7 days ahead
-    for (let i = 0; i < 7; i++) {
-      const checkDate = new Date(today)
-      checkDate.setDate(today.getDate() + i)
+    // Determine the current "day" based on 4 AM to 2 AM cycle
+    let currentDay = new Date(now)
+    if (currentHour >= 2 && currentHour < 4) {
+      // Between 2 AM and 4 AM, we're still in the previous day's cycle
+      currentDay.setDate(now.getDate() - 1)
+    }
+
+    console.log('Finding available day for', allTasks.length, 'total tasks (4 AM to 2 AM cycle)')
+    console.log('Current hour:', currentHour, 'Current day cycle:', currentDay.toDateString())
+
+    // First, check if there are tasks for the current day cycle
+    const currentDayTasks = allTasks.filter(task =>
+      task.day && isTaskForDate(task.day, currentDay)
+    )
+
+    console.log('Tasks for current day cycle:', currentDayTasks.length)
+    if (currentDayTasks.length > 0) {
+      return currentDay
+    }
+
+    // If no tasks for current day cycle, check the next 7 days
+    for (let i = 1; i <= 7; i++) {
+      const checkDate = new Date(currentDay)
+      checkDate.setDate(currentDay.getDate() + i)
 
       const tasksForDay = allTasks.filter(task =>
-        isTaskForDate(task.scheduledDate, task.createdAt, checkDate)
+        task.day && isTaskForDate(task.day, checkDate)
       )
+
+      console.log(`Tasks for day +${i}:`, tasksForDay.length, 'date:', checkDate.toLocaleDateString('en-CA'))
 
       if (tasksForDay.length > 0) {
         return checkDate
       }
     }
 
-    // If no tasks found in the next 7 days, return today
-    return today
+    // If no tasks found in the next 7 days, check the previous 7 days
+    for (let i = 1; i <= 7; i++) {
+      const checkDate = new Date(currentDay)
+      checkDate.setDate(currentDay.getDate() - i)
+
+      const tasksForDay = allTasks.filter(task =>
+        task.day && isTaskForDate(task.day, checkDate)
+      )
+
+      console.log(`Tasks for day -${i}:`, tasksForDay.length, 'date:', checkDate.toLocaleDateString('en-CA'))
+
+      if (tasksForDay.length > 0) {
+        return checkDate
+      }
+    }
+
+    // If no tasks found anywhere, return current day
+    console.log('No tasks found in any day, returning current day')
+    return currentDay
+  }
+
+  // Function to fetch and filter tasks for a specific date
+  const fetchTasksForDate = async (targetDate: Date) => {
+    try {
+      const response = await fetch('/api/tasks', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        }
+      })
+      if (response.ok) {
+        const data = await response.json()
+
+        console.log('Filtering tasks for date:', targetDate.toLocaleDateString('en-CA'))
+        console.log('Target day name:', targetDate.toLocaleDateString('en-US', { weekday: 'long' }))
+
+        // Filter tasks for the target date using simplified day format
+        const tasksForDate = data.filter((task: any) => {
+          const matches = task.day && isTaskForDate(task.day, targetDate)
+          console.log(`Task "${task.title}" (day: ${task.day}) matches ${targetDate.toLocaleDateString('en-US', { weekday: 'long' })}:`, matches)
+          return matches
+        })
+
+        console.log('Task filtering results for', targetDate.toLocaleDateString('en-CA'), ':', {
+          totalTasks: data.length,
+          tasksForDate: tasksForDate.length,
+          sampleTasks: tasksForDate.slice(0, 3).map((t: any) => ({
+            id: t._id,
+            title: t.title,
+            day: t.day,
+            time: t.time
+          }))
+        })
+
+        // Convert MongoDB tasks to matrix format
+        const matrixTasks = tasksForDate.map((task: any) => ({
+          ...task,
+          quadrant: getQuadrantFromCategory(task.eisenhowerCategory)
+        }))
+        setTasks(matrixTasks)
+      }
+    } catch (error) {
+      console.error('Error fetching tasks:', error)
+    }
   }
 
   // Fetch tasks from MongoDB and filter for today only
@@ -103,41 +195,22 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         if (response.ok) {
           const data = await response.json()
 
+          console.log('Raw task data from API:', {
+            totalTasks: data.length,
+            sampleTasks: data.slice(0, 3).map((t: any) => ({
+              id: t._id,
+              title: t.title,
+              day: t.day,
+              eisenhowerCategory: t.eisenhowerCategory
+            }))
+          })
+
           // Find the next available day with tasks
           const availableDate = findNextAvailableDay(data)
           setDisplayDate(availableDate)
 
           // Filter tasks for the available date
-          const tasksForDate = data.filter((task: any) => {
-            const isForDate = isTaskForDate(task.scheduledDate, task.createdAt, availableDate)
-
-            console.log('Date comparison:', {
-              taskId: task._id,
-              taskTitle: task.title,
-              scheduledDate: task.scheduledDate,
-              createdAt: task.createdAt,
-              availableDate: availableDate.toISOString().split('T')[0],
-              isForDate
-            })
-
-            return isForDate
-          })
-
-          console.log('Filtering tasks for date:', {
-            availableDate: availableDate.toISOString(),
-            availableDateString: availableDate.toISOString().split('T')[0],
-            totalTasks: data.length,
-            tasksFound: tasksForDate.length
-          })
-
-          console.log('Tasks found for date:', tasksForDate.length)
-
-          // Convert MongoDB tasks to matrix format
-          const matrixTasks = tasksForDate.map((task: any) => ({
-            ...task,
-            quadrant: getQuadrantFromCategory(task.eisenhowerCategory)
-          }))
-          setTasks(matrixTasks)
+          await fetchTasksForDate(availableDate)
         }
       } catch (error) {
         console.error('Error fetching tasks:', error)
@@ -147,7 +220,68 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
     }
 
     fetchTasks()
+  }, []) // Only run once on mount
+
+  // Set up interval to check for new day cycle (every hour)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date()
+      const currentHour = now.getHours()
+
+      // Check if we've entered a new day cycle (4 AM to 2 AM)
+      // If it's 4 AM, refresh tasks
+      if (currentHour === 4) {
+        console.log('New day cycle detected (4 AM), refreshing tasks...')
+
+        // Fetch tasks and update display date
+        const fetchTasks = async () => {
+          try {
+            const response = await fetch('/api/tasks', {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+              }
+            })
+            if (response.ok) {
+              const data = await response.json()
+              const availableDate = findNextAvailableDay(data)
+              setDisplayDate(availableDate)
+              await fetchTasksForDate(availableDate)
+            }
+          } catch (error) {
+            console.error('Error fetching tasks:', error)
+          }
+        }
+
+        fetchTasks()
+      }
+    }, 60 * 60 * 1000) // Check every hour
+
+    return () => clearInterval(interval)
+  }, []) // Only run once on mount
+
+  // Update current time every minute
+  useEffect(() => {
+    const timeInterval = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 60000) // Update every minute
+
+    return () => clearInterval(timeInterval)
   }, [])
+
+  // Close date picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showDatePicker) {
+        const target = event.target as Element
+        if (!target.closest('.date-picker-container')) {
+          setShowDatePicker(false)
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showDatePicker])
 
   // Convert eisenhowerCategory to quadrant number
   const getQuadrantFromCategory = (category: string): 1 | 2 | 3 | 4 => {
@@ -174,14 +308,21 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   // Use only tasks from database (schedule tasks are now saved to database with proper scheduledDate)
   const allTasks = tasks
 
-  console.log('Total tasks to display:', {
+  console.log('Total tasks to display for', displayDate.toLocaleDateString('en-CA'), ':', {
     totalTasks: allTasks.length,
+    displayDate: displayDate.toDateString(),
     tasksByQuadrant: {
       q1: allTasks.filter(t => t.quadrant === 1).length,
       q2: allTasks.filter(t => t.quadrant === 2).length,
       q3: allTasks.filter(t => t.quadrant === 3).length,
       q4: allTasks.filter(t => t.quadrant === 4).length
-    }
+    },
+    sampleTasks: allTasks.slice(0, 3).map(t => ({
+      id: t._id,
+      title: t.title,
+      day: t.day,
+      quadrant: t.quadrant
+    }))
   })
 
   const addTask = async () => {
@@ -197,7 +338,8 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
         body: JSON.stringify({
           title: newTask,
           eisenhowerCategory: getCategoryFromQuadrant(selectedQuadrant),
-          scheduledDate: new Date().toISOString()
+          day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+          time: new Date().getHours()
         }),
       })
 
@@ -290,19 +432,45 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
 
   const getTasksByQuadrant = (quadrant: 1 | 2 | 3 | 4) => allTasks.filter((task) => task.quadrant === quadrant)
 
+  // Handle date selection from calendar
+  const handleDateSelect = async (selectedDate: Date) => {
+    setDisplayDate(selectedDate)
+    setShowDatePicker(false)
+    await fetchTasksForDate(selectedDate)
+  }
+
+  // Handle calendar icon click
+  const handleCalendarClick = () => {
+    setShowDatePicker(!showDatePicker)
+  }
+
   return (
     <div className="space-y-8">
-      {/* Today's Date Display */}
+      {/* Date Display and Selector */}
       <Card className="premium-card glow-border light-shadow animate-scale-in">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Calendar className="h-5 w-5 text-primary" />
-              </div>
+              <button
+                onClick={handleCalendarClick}
+                className={cn(
+                  "date-picker-container p-2 rounded-lg transition-colors cursor-pointer group",
+                  showDatePicker
+                    ? "bg-primary/20 border-2 border-primary/30"
+                    : "bg-primary/10 hover:bg-primary/20"
+                )}
+                title="Click to select date"
+              >
+                <Calendar className={cn(
+                  "h-5 w-5 transition-colors",
+                  showDatePicker
+                    ? "text-primary"
+                    : "text-primary group-hover:text-primary/80"
+                )} />
+              </button>
               <div>
                 <h3 className="font-semibold text-lg">
-                  {displayDate.toDateString() === new Date().toDateString() ? "Today's Tasks" : "Upcoming Tasks"}
+                  {displayDate.toDateString() === new Date().toDateString() ? "Today's Tasks" : "Scheduled Tasks"}
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   Showing tasks scheduled for {displayDate.toLocaleDateString('en-US', {
@@ -310,18 +478,131 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric'
-                  })}
+                  })} (4 AM - 2 AM cycle)
                   {displayDate.toDateString() !== new Date().toDateString() && (
-                    <span className="ml-2 text-blue-600 dark:text-blue-400">
-                      (No tasks for today)
+                    <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
+                      (No tasks for current day cycle - showing next available day)
                     </span>
                   )}
                 </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Current time: {currentTime.toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                  })} • Day cycle: {(() => {
+                    const hour = currentTime.getHours()
+                    if (hour >= 4 && hour < 24) return "Active day"
+                    if (hour >= 0 && hour < 2) return "Active day (overnight)"
+                    return "Transition period (2 AM - 4 AM)"
+                  })()}
+                </p>
               </div>
             </div>
-            <Badge variant="outline" className="text-sm">
-              {tasks.length} tasks
-            </Badge>
+            <div className="flex items-center gap-3 relative">
+              {showDatePicker && (
+                <div className="date-picker-container absolute top-full right-0 mt-2 z-50 bg-background border border-input rounded-lg shadow-lg p-4 min-w-[280px]">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-sm">Select Date</h4>
+                      <button
+                        onClick={() => setShowDatePicker(false)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <input
+                      type="date"
+                      value={displayDate.toLocaleDateString('en-CA')}
+                      onChange={(e) => {
+                        const newDate = new Date(e.target.value)
+                        handleDateSelect(newDate)
+                      }}
+                      className="w-full px-3 py-2 border border-input bg-background rounded-lg text-sm focus-ring"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => {
+                          const today = new Date()
+                          handleDateSelect(today)
+                        }}
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 text-xs"
+                      >
+                        Today
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          const yesterday = new Date()
+                          yesterday.setDate(yesterday.getDate() - 1)
+                          handleDateSelect(yesterday)
+                        }}
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 text-xs"
+                      >
+                        Yesterday
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          const tomorrow = new Date()
+                          tomorrow.setDate(tomorrow.getDate() + 1)
+                          handleDateSelect(tomorrow)
+                        }}
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 text-xs"
+                      >
+                        Tomorrow
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground">
+                  {displayDate.toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric'
+                  })}
+                </span>
+                <Button
+                  onClick={handleCalendarClick}
+                  variant="outline"
+                  size="sm"
+                  className="date-picker-container btn-premium text-xs"
+                >
+                  Change Date
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                {displayDate.toDateString() !== new Date().toDateString() && (
+                  <>
+                    <Badge variant="secondary" className="text-sm bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                      Next Available Day
+                    </Badge>
+                    <Button
+                      onClick={() => {
+                        const today = new Date()
+                        setDisplayDate(today)
+                        fetchTasksForDate(today)
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="btn-premium text-xs"
+                    >
+                      Go to Today
+                    </Button>
+                  </>
+                )}
+                <Badge variant="outline" className="text-sm">
+                  {tasks.length} tasks
+                </Badge>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -442,6 +723,24 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                               <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
                             </div>
                           )}
+
+                          {/* Day and Time Info */}
+                          {(task.day || task.time !== undefined) && (
+                            <div className="ml-6">
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                {task.day && (
+                                  <span className="px-1.5 py-0.5 bg-primary/10 rounded text-primary font-medium">
+                                    {task.day}
+                                  </span>
+                                )}
+                                {task.time !== undefined && (
+                                  <span className="px-1.5 py-0.5 bg-secondary/10 rounded text-secondary-foreground font-medium">
+                                    {task.time === 0 ? '12am' : task.time === 12 ? '12pm' : task.time > 12 ? `${task.time - 12}pm` : `${task.time}am`}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )
@@ -467,7 +766,11 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
           <ul className="text-sm text-muted-foreground space-y-2 leading-relaxed">
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
-              <strong>Today's tasks</strong> are shown first, or the next available day with tasks
+              <strong>Click the calendar icon</strong> or "Change Date" button to select any date and view tasks for that day
+            </li>
+            <li className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>
+              <strong>Today's tasks</strong> are shown first (using 4 AM to 2 AM day cycle). If no tasks exist for the current day cycle, the next available day with tasks is displayed
             </li>
             <li className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary"></div>

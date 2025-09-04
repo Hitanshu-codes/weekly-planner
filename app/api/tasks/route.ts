@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7)
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key') as any
 
-    const { title, description, priority, category, eisenhowerCategory, duration } = await request.json()
+    const { title, description, priority, category, eisenhowerCategory, duration, day, time, scheduledDate } = await request.json()
 
     if (!title) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 })
@@ -58,6 +58,10 @@ export async function POST(request: NextRequest) {
       eisenhowerCategory: eisenhowerCategory || "not-urgent-not-important",
       duration: duration || 1,
       completed: false,
+      // Support both old and new formats
+      ...(scheduledDate && { scheduledDate: new Date(scheduledDate) }),
+      ...(day && { day }),
+      ...(time !== undefined && { time }),
     })
 
     const savedTask = await task.save()

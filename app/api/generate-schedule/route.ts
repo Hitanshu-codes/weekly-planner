@@ -47,8 +47,8 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7)
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key') as any
 
-    const { goals } = await request.json()
-    console.log("[API] Received goals:", goals, "userId:", decoded.userId)
+    const { goals, replaceExisting = false, existingScheduleId } = await request.json()
+    console.log("[API] Received goals:", goals, "userId:", decoded.userId, "replaceExisting:", replaceExisting)
 
     if (!goals) {
       console.log("[API] Error: No goals provided")
@@ -84,35 +84,46 @@ For each task, you must categorize it using the Eisenhower Matrix:
 - "not-urgent-not-important": Tasks that are neither urgent nor important (time wasters, excessive social media, busy work)
 
 Return a JSON object with this exact structure (only include the days mentioned above):
+IMPORTANT: The keys inside each day are the time in 24-hour format (0-23) and should be in chronological order.
+
 {
   "Monday": {
-    "8": {"title": "Morning Routine", "description": "Exercise and breakfast", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
-    "9": {"title": "Work Block 1", "description": "Focus on main project", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"},
-    "10": {"title": "Work Block 2", "description": "Meetings and emails", "priority": "medium", "category": "Work", "eisenhowerCategory": "urgent-not-important"}
+    "6": {"title": "Morning Routine", "description": "Exercise and breakfast", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
+    "8": {"title": "Work Block 1", "description": "Focus on main project", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"},
+    "9": {"title": "Work Block 2", "description": "Meetings and emails", "priority": "medium", "category": "Work", "eisenhowerCategory": "urgent-not-important"},
+    "12": {"title": "Lunch Break", "description": "Healthy meal and rest", "priority": "medium", "category": "Break", "eisenhowerCategory": "not-urgent-important"},
+    "14": {"title": "Afternoon Work", "description": "Continue with project tasks", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"},
+    "22": {"title": "Evening Wind Down", "description": "Relax and prepare for sleep", "priority": "medium", "category": "Personal", "eisenhowerCategory": "not-urgent-important"}
   },
   "Tuesday": {
     "8": {"title": "Exercise", "description": "Fitness routine", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
-    "10": {"title": "Learning", "description": "Skill development", "priority": "medium", "category": "Learning", "eisenhowerCategory": "not-urgent-important"}
+    "10": {"title": "Learning", "description": "Skill development", "priority": "medium", "category": "Learning", "eisenhowerCategory": "not-urgent-important"},
+    "13": {"title": "Work Session", "description": "Focus on important tasks", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"}
   },
   "Wednesday": {
     "8": {"title": "Morning Routine", "description": "Start your day right", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
-    "9": {"title": "Work Focus", "description": "Main project work", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"}
+    "9": {"title": "Team Meeting", "description": "Collaborate with team members", "priority": "medium", "category": "Work", "eisenhowerCategory": "urgent-not-important"},
+    "11": {"title": "Deep Work", "description": "Focus on complex tasks", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"}
   },
   "Thursday": {
     "8": {"title": "Exercise", "description": "Fitness routine", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
-    "10": {"title": "Learning", "description": "Skill development", "priority": "medium", "category": "Learning", "eisenhowerCategory": "not-urgent-important"}
+    "10": {"title": "Learning", "description": "Skill development", "priority": "medium", "category": "Learning", "eisenhowerCategory": "not-urgent-important"},
+    "14": {"title": "Project Work", "description": "Continue with ongoing projects", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"}
   },
   "Friday": {
     "8": {"title": "Morning Routine", "description": "Start your day right", "priority": "high", "category": "Health", "eisenhowerCategory": "not-urgent-important"},
-    "9": {"title": "Work Focus", "description": "Main project work", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"}
+    "9": {"title": "Work Focus", "description": "Main project work", "priority": "high", "category": "Work", "eisenhowerCategory": "urgent-important"},
+    "16": {"title": "Week Review", "description": "Plan and organize for next week", "priority": "medium", "category": "Personal", "eisenhowerCategory": "not-urgent-important"}
   },
   "Saturday": {
     "10": {"title": "Family Time", "description": "Spend quality time with family", "priority": "medium", "category": "Family", "eisenhowerCategory": "not-urgent-important"},
-    "14": {"title": "Personal Project", "description": "Work on hobbies or personal interests", "priority": "low", "category": "Personal", "eisenhowerCategory": "not-urgent-not-important"}
+    "14": {"title": "Personal Project", "description": "Work on hobbies or personal interests", "priority": "low", "category": "Personal", "eisenhowerCategory": "not-urgent-not-important"},
+    "18": {"title": "Relaxation", "description": "Unwind and recharge", "priority": "low", "category": "Personal", "eisenhowerCategory": "not-urgent-not-important"}
   },
   "Sunday": {
     "10": {"title": "Rest and Planning", "description": "Plan for next week and rest", "priority": "medium", "category": "Personal", "eisenhowerCategory": "not-urgent-important"},
-    "16": {"title": "Preparation", "description": "Prepare for the week ahead", "priority": "medium", "category": "Personal", "eisenhowerCategory": "not-urgent-important"}
+    "16": {"title": "Preparation", "description": "Prepare for the week ahead", "priority": "medium", "category": "Personal", "eisenhowerCategory": "not-urgent-important"},
+    "23": {"title": "Late Night Wind Down", "description": "Relax before sleep", "priority": "low", "category": "Personal", "eisenhowerCategory": "not-urgent-not-important"}
   }
 }
 
@@ -414,8 +425,62 @@ Guidelines:
         return NextResponse.json({ error: "User not found" }, { status: 404 })
       }
 
+      // Check if a schedule already exists for this week
       const weekStartDate = new Date()
       weekStartDate.setHours(0, 0, 0, 0) // Start of the week
+
+      // Calculate the week range (Monday to Sunday)
+      const currentDay = weekStartDate.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      const daysToMonday = currentDay === 0 ? 6 : currentDay - 1 // Days to get to Monday
+      const mondayDate = new Date(weekStartDate)
+      mondayDate.setDate(weekStartDate.getDate() - daysToMonday)
+      mondayDate.setHours(0, 0, 0, 0)
+
+      const sundayDate = new Date(mondayDate)
+      sundayDate.setDate(mondayDate.getDate() + 6)
+      sundayDate.setHours(23, 59, 59, 999)
+
+      console.log("[API] Checking for existing schedule between:", mondayDate.toISOString(), "and", sundayDate.toISOString())
+
+      // Check for existing active schedule in this week
+      const existingSchedule = await WeeklySchedule.findOne({
+        userId: user._id,
+        weekStartDate: {
+          $gte: mondayDate,
+          $lte: sundayDate
+        },
+        isActive: true
+      })
+
+      if (existingSchedule && !replaceExisting) {
+        console.log("[API] Found existing schedule for this week:", existingSchedule._id)
+        return NextResponse.json({
+          warning: "A schedule already exists for this week",
+          existingScheduleId: existingSchedule._id,
+          existingScheduleDate: existingSchedule.weekStartDate,
+          message: "Do you want to replace the existing schedule? This will remove all current tasks and time slots for this week.",
+          hasExistingSchedule: true
+        }, { status: 200 })
+      }
+
+      // If we're replacing an existing schedule, delete the old one first
+      if (replaceExisting && existingSchedule) {
+        console.log("[API] Replacing existing schedule:", existingSchedule._id)
+
+        // Delete associated time slots
+        await TimeSlot.deleteMany({ userId: user._id, _id: { $in: existingSchedule.timeSlots } })
+
+        // Delete associated tasks
+        const tasksToDelete = await Task.find({ userId: user._id, _id: { $in: existingSchedule.timeSlots } })
+        await Task.deleteMany({ userId: user._id, _id: { $in: tasksToDelete.map(t => t._id) } })
+
+        // Delete the schedule
+        await WeeklySchedule.findByIdAndDelete(existingSchedule._id)
+
+        console.log("[API] Successfully deleted existing schedule and associated data")
+      }
+
+      console.log("[API] No existing schedule found, proceeding with generation")
 
       // Create tasks and time slots
       const createdTasks = []
@@ -476,9 +541,9 @@ Guidelines:
             dayDate.setDate(today.getDate() + daysToAdd)
             dayDate.setHours(parseInt(hour), 0, 0, 0)
 
-            console.log(`[API] Creating task for ${day} ${hour}:00 - scheduledDate: ${dayDate.toISOString()}`)
+            console.log(`[API] Creating task for ${day} ${hour}:00 - day: ${day}, time: ${hour}`)
 
-            // Create task with new model structure
+            // Create task with new simplified model structure
             const newTask = new Task({
               userId: user._id,
               title: task.title || "Generated Task",
@@ -488,7 +553,8 @@ Guidelines:
               eisenhowerCategory: normalizedEisenhowerCategory,
               completed: false,
               duration: task.duration || 1,
-              scheduledDate: dayDate,
+              day: day,
+              time: parseInt(hour),
             })
 
             const savedTask = await newTask.save()
