@@ -117,7 +117,7 @@ Return a JSON object with this exact structure (only include the days mentioned 
 }
 
 Guidelines:
-- Use hours 8-22 (8am-10pm)
+- Use hours 4-2 (4am-2am next day) - this covers 22 hours from 4am to 2am
 - Include realistic breaks and meals
 - Balance work, personal, health, and learning activities
 - Set appropriate priorities: "high", "medium", "low"
@@ -208,7 +208,7 @@ Guidelines:
       // Define all possible day schedules
       const daySchedules = {
         Monday: {
-          "8": {
+          "6": {
             title: "Morning Routine",
             description: "Start your day right with exercise and breakfast",
             priority: "high",
@@ -235,6 +235,13 @@ Guidelines:
             priority: "high",
             category: "Work",
             eisenhowerCategory: "urgent-important"
+          },
+          "22": {
+            title: "Evening Wind Down",
+            description: "Relax and prepare for sleep",
+            priority: "medium",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-important"
           },
         },
         Tuesday: {
@@ -367,9 +374,16 @@ Guidelines:
             category: "Personal",
             eisenhowerCategory: "not-urgent-important"
           },
-          "20": {
-            title: "Evening Routine",
-            description: "Set up for successful week",
+          "23": {
+            title: "Late Night Wind Down",
+            description: "Relax before sleep",
+            priority: "low",
+            category: "Personal",
+            eisenhowerCategory: "not-urgent-not-important"
+          },
+          "1": {
+            title: "Late Night Activity",
+            description: "Personal time or late work",
             priority: "low",
             category: "Personal",
             eisenhowerCategory: "not-urgent-not-important"

@@ -162,17 +162,33 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
       const slots: TimeSlot[] = []
 
       for (const day of days) {
-        for (let hour = 8; hour <= 21; hour++) {
+        // Create time slots for custom time range: 4am to 2am next day (22 hours)
+        // Hours: 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2
+        const hours = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2]
+
+        for (const hour of hours) {
           const slotId = `${day}-${hour}`
 
           // Check if we already have this slot
           const existingSlot = timeSlots.find((slot) => {
             const slotDay = new Date(slot.day).toLocaleDateString('en-US', { weekday: 'long' })
             const slotHour = new Date(slot.startTime).getHours()
-            return slotDay === day && slotHour === hour
+            const slotDate = new Date(slot.startTime).toDateString()
+            const currentDate = new Date(slot.day).toDateString()
+
+            // For hours 0, 1, 2, check if the slot is on the next day
+            if (hour === 0 || hour === 1 || hour === 2) {
+              const nextDay = new Date(slot.day)
+              nextDay.setDate(nextDay.getDate() + 1)
+              return slotDay === day && slotHour === hour && slotDate === nextDay.toDateString()
+            }
+
+            // For other hours, check if the slot is on the same day
+            return slotDay === day && slotHour === hour && slotDate === currentDate
           })
 
           if (existingSlot) {
+            console.log(`[WeeklySchedule] Using existing slot for ${day} ${hour}:00 with task:`, existingSlot.task ? existingSlot.task.title : 'no task')
             slots.push(existingSlot)
           } else {
             let task: Task | undefined
@@ -250,7 +266,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
               }
             }
 
-            // Create time slot via API
+            // Always create time slot (for all 24 hours), with or without task
             // Calculate the scheduled date for this time slot using the same logic
             const today = new Date()
             const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
@@ -277,11 +293,20 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
             const dayDate = new Date(today)
             dayDate.setDate(today.getDate() + daysToAdd)
 
-            const startTime = new Date(dayDate)
-            startTime.setHours(hour, 0, 0, 0)
+            // Handle hours 0, 1, 2 which are on the next day
+            let actualHour = hour
+            let actualDayDate = new Date(dayDate)
 
-            const endTime = new Date(dayDate)
-            endTime.setHours(hour + 1, 0, 0, 0)
+            if (hour === 0 || hour === 1 || hour === 2) {
+              // These hours are on the next day
+              actualDayDate.setDate(dayDate.getDate() + 1)
+            }
+
+            const startTime = new Date(actualDayDate)
+            startTime.setHours(actualHour, 0, 0, 0)
+
+            const endTime = new Date(actualDayDate)
+            endTime.setHours(actualHour + 1, 0, 0, 0)
 
             const slotResponse = await fetch('/api/time-slots', {
               method: 'POST',
@@ -293,12 +318,13 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                 day: dayDate.toISOString(),
                 startTime: startTime.toISOString(),
                 endTime: endTime.toISOString(),
-                taskId: task?._id
+                taskId: task?._id || null // null if no task
               }),
             })
 
             if (slotResponse.ok) {
               const newSlot = await slotResponse.json()
+              console.log(`[WeeklySchedule] Created new slot for ${day} ${hour}:00 with task:`, newSlot.task ? newSlot.task.title : 'no task')
               slots.push(newSlot)
             }
           }
@@ -565,6 +591,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
       return slotDay === day
     })
     console.log("[WeeklySchedule] getSlotsByDay for", day, ":", daySlots.length, "slots")
+    console.log("[WeeklySchedule] Slots with tasks:", daySlots.filter(slot => slot.task).length)
     return daySlots
   }
 
@@ -730,13 +757,13 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
           {/* Scrollable Time Columns */}
           <div className="flex-1 overflow-x-auto">
-            <div className="min-w-[1800px]">
+            <div className="min-w-[2400px]">
               {/* Time Headers Row */}
-              <div className="flex gap-4 mb-4">
-                {Array.from({ length: 14 }, (_, i) => i + 8).map((hour) => (
-                  <div key={hour} className="w-36 h-16 flex items-center justify-center bg-muted/30 rounded-xl border flex-shrink-0">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      {hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
+              <div className="flex gap-2 mb-4">
+                {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour) => (
+                  <div key={hour} className="w-24 h-16 flex items-center justify-center bg-muted/30 rounded-xl border flex-shrink-0">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {hour === 0 ? '12am' : hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
                     </span>
                   </div>
                 ))}
@@ -747,9 +774,23 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                 const daySlots = getSlotsByDay(day)
 
                 return (
-                  <div key={day} className="flex gap-4 mb-4">
-                    {Array.from({ length: 14 }, (_, i) => i + 8).map((hour) => {
-                      const slot = daySlots.find(s => new Date(s.startTime).getHours() === hour)
+                  <div key={day} className="flex gap-2 mb-4">
+                    {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour) => {
+                      const slot = daySlots.find(s => {
+                        const slotHour = new Date(s.startTime).getHours()
+                        const slotDate = new Date(s.startTime).toDateString()
+                        const currentDate = new Date(s.day).toDateString()
+
+                        // For hours 0, 1, 2, check if the slot is on the next day
+                        if (hour === 0 || hour === 1 || hour === 2) {
+                          const nextDay = new Date(s.day)
+                          nextDay.setDate(nextDay.getDate() + 1)
+                          return slotHour === hour && slotDate === nextDay.toDateString()
+                        }
+
+                        // For other hours, check if the slot is on the same day
+                        return slotHour === hour && slotDate === currentDate
+                      })
                       const isSelected = selectedSlot === slot?._id
                       const hasTask = !!slot?.task
                       const isDragOver = dragOverTarget === slot?._id
@@ -759,7 +800,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                         <div
                           key={`${day}-${hour}`}
                           className={cn(
-                            "w-36 h-40 border rounded-xl transition-all duration-200 cursor-pointer group relative flex-shrink-0",
+                            "w-24 h-32 border rounded-xl transition-all duration-200 cursor-pointer group relative flex-shrink-0",
                             hasTask
                               ? slot?.task?.completed
                                 ? "bg-muted/50 opacity-75"
@@ -793,7 +834,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                           {/* Task Content */}
                           {hasTask && slot?.task ? (
                             <div
-                              className="p-3 h-full flex flex-col"
+                              className="p-2 h-full flex flex-col"
                               draggable
                               onDragStart={(e) => {
                                 if (slot?.task) {
@@ -808,10 +849,10 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                               onDragEnd={handleDragEnd}
                             >
                               {/* Title Section */}
-                              <div className="mb-2">
+                              <div className="mb-1">
                                 <h4
                                   className={cn(
-                                    "text-sm font-bold leading-tight text-pretty line-clamp-2 mb-1",
+                                    "text-xs font-bold leading-tight text-pretty line-clamp-2 mb-1",
                                     slot.task?.completed && "line-through opacity-60",
                                     slot.task?.eisenhowerCategory === "urgent-important" && "text-red-700 dark:text-red-300",
                                     slot.task?.eisenhowerCategory === "urgent-not-important" && "text-orange-700 dark:text-orange-300",
@@ -825,19 +866,19 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
                               {/* Description Section */}
                               {slot.task?.description && (
-                                <div className="mb-2 flex-1 min-h-0">
-                                  <p className="text-xs opacity-80 line-clamp-2 text-pretty leading-relaxed">
+                                <div className="mb-1 flex-1 min-h-0">
+                                  <p className="text-xs opacity-80 line-clamp-1 text-pretty leading-relaxed">
                                     {slot.task.description}
                                   </p>
                                 </div>
                               )}
 
                               {/* Category Badge */}
-                              <div className="mb-2">
+                              <div className="mb-1">
                                 <Badge
                                   variant="outline"
                                   className={cn(
-                                    "text-xs font-medium px-2 py-1 w-fit",
+                                    "text-xs font-medium px-1 py-0.5 w-fit",
                                     slot.task?.category === "Work" && "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
                                     slot.task?.category === "Health" && "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700",
                                     slot.task?.category === "Personal" && "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700",
@@ -852,11 +893,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
 
                               {/* Action Buttons */}
-                              <div className="flex gap-1 mt-auto pt-2 border-t border-white/10">
+                              <div className="flex gap-1 mt-auto pt-1 border-t border-white/10">
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  className="h-6 w-6 p-0 hover:bg-primary/10 focus-ring flex-1"
+                                  className="h-5 w-5 p-0 hover:bg-primary/10 focus-ring flex-1"
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     if (slot?.task) {
@@ -870,7 +911,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  className="h-6 w-6 p-0 hover:bg-primary/10 focus-ring flex-1"
+                                  className="h-5 w-5 p-0 hover:bg-primary/10 focus-ring flex-1"
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     console.log("[WeeklySchedule] Merging slot:", slot?._id, "with next")
@@ -883,8 +924,8 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                             </div>
                           ) : (
                             <div className="flex items-center justify-center h-full">
-                              <span className="text-sm text-muted-foreground">
-                                {isDragOver ? "Drop task here" : "Empty slot"}
+                              <span className="text-xs text-muted-foreground">
+                                {isDragOver ? "Drop here" : ""}
                               </span>
                             </div>
                           )}
