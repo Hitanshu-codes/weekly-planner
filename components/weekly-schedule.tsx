@@ -424,77 +424,93 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
     }
   }
 
-  const mergeWithNext = async (slotId: string) => {
-    console.log("[WeeklySchedule] mergeWithNext called for slotId:", slotId)
-    const slotIndex = timeSlots.findIndex((slot) => slot._id === slotId)
-    const nextSlotIndex = slotIndex + 1
+  const mergeWithNext = async (currentSlotId: string, nextSlotId: string) => {
+    console.log("[WeeklySchedule] mergeWithNext called for currentSlotId:", currentSlotId, "nextSlotId:", nextSlotId)
 
-    console.log("[WeeklySchedule] Slot indices - current:", slotIndex, "next:", nextSlotIndex, "total slots:", timeSlots.length)
+    const currentSlot = timeSlots.find(s => s._id === currentSlotId)
+    const nextSlot = timeSlots.find(s => s._id === nextSlotId)
 
-    if (nextSlotIndex < timeSlots.length) {
-      const currentSlot = timeSlots[slotIndex]
-      const nextSlot = timeSlots[nextSlotIndex]
+    if (!currentSlot || !nextSlot) {
+      console.log("[WeeklySchedule] One or both slots not found")
+      return
+    }
 
-      console.log("[WeeklySchedule] Current slot:", currentSlot, "Next slot:", nextSlot)
+    console.log("[WeeklySchedule] Current slot:", currentSlot, "Next slot:", nextSlot)
 
-      // Only merge if they're on the same day and consecutive hours
-      const currentDay = new Date(currentSlot.day).toDateString()
-      const nextDay = new Date(nextSlot.day).toDateString()
-      const currentEndHour = new Date(currentSlot.endTime).getHours()
-      const nextStartHour = new Date(nextSlot.startTime).getHours()
+    // Only merge if they're on the same day and consecutive hours
+    const currentDay = new Date(currentSlot.day).toDateString()
+    const nextDay = new Date(nextSlot.day).toDateString()
+    const currentEndHour = new Date(currentSlot.endTime).getHours()
+    const nextStartHour = new Date(nextSlot.startTime).getHours()
 
-      if (currentDay === nextDay && currentEndHour === nextStartHour) {
-        console.log("[WeeklySchedule] Merge conditions met - same day and consecutive hours")
+    if (currentDay === nextDay && currentEndHour === nextStartHour) {
+      console.log("[WeeklySchedule] Merge conditions met - same day and consecutive hours")
 
-        try {
-          // Update current slot to extend end time
-          const newEndTime = new Date(nextSlot.endTime)
-          const response = await fetch(`/api/time-slots/${currentSlot._id}`, {
+      try {
+        // Determine which slot has a task (prioritize current slot)
+        const taskToKeep = currentSlot.task || nextSlot.task
+        const taskIdToKeep = taskToKeep?._id || null
+
+        // Update current slot to extend end time and include the task
+        const newEndTime = new Date(nextSlot.endTime)
+        const response = await fetch(`/api/time-slots/${currentSlot._id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          },
+          body: JSON.stringify({
+            endTime: newEndTime.toISOString(),
+            task: taskIdToKeep,
+            merged: true
+          }),
+        })
+
+        if (response.ok) {
+          // Update next slot to have the same task and mark as merged
+          await fetch(`/api/time-slots/${nextSlot._id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
             },
             body: JSON.stringify({
-              endTime: newEndTime.toISOString(),
+              task: taskIdToKeep,
               merged: true
             }),
           })
 
-          if (response.ok) {
-            // Delete the next slot
-            await fetch(`/api/time-slots/${nextSlot._id}`, {
-              method: 'DELETE',
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          // Update local state - both slots now have the same task
+          setTimeSlots((slots) => {
+            return slots.map((slot) => {
+              if (slot._id === currentSlotId) {
+                return {
+                  ...slot,
+                  endTime: newEndTime,
+                  task: taskToKeep,
+                  merged: true,
+                }
+              } else if (slot._id === nextSlotId) {
+                return {
+                  ...slot,
+                  task: taskToKeep,
+                  merged: true,
+                }
               }
+              return slot
             })
+          })
 
-            // Update local state
-            setTimeSlots((slots) => {
-              const newSlots = [...slots]
-              newSlots[slotIndex] = {
-                ...currentSlot,
-                endTime: newEndTime,
-                merged: true,
-              }
-              newSlots.splice(nextSlotIndex, 1)
-              return newSlots
-            })
-
-            console.log("[WeeklySchedule] Merge completed successfully")
-          }
-        } catch (error) {
-          console.error('Error merging slots:', error)
+          console.log("[WeeklySchedule] Merge completed successfully - both slots now have same content")
         }
-      } else {
-        console.log("[WeeklySchedule] Merge conditions not met:")
-        console.log("[WeeklySchedule] - Same day:", currentDay === nextDay)
-        console.log("[WeeklySchedule] - Consecutive hours:", currentEndHour === nextStartHour)
-        console.log("[WeeklySchedule] - Current endHour:", currentEndHour, "Next startHour:", nextStartHour)
+      } catch (error) {
+        console.error('Error merging slots:', error)
       }
     } else {
-      console.log("[WeeklySchedule] Cannot merge - next slot index out of bounds")
+      console.log("[WeeklySchedule] Merge conditions not met:")
+      console.log("[WeeklySchedule] - Same day:", currentDay === nextDay)
+      console.log("[WeeklySchedule] - Consecutive hours:", currentEndHour === nextStartHour)
+      console.log("[WeeklySchedule] - Current endHour:", currentEndHour, "Next startHour:", nextStartHour)
     }
   }
 
@@ -741,7 +757,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
               console.log("[WeeklySchedule] Rendering day row:", day, "with", daySlots.length, "slots")
 
               return (
-                <div key={day} className="h-40 mb-4 flex items-center justify-center bg-primary/10 rounded-xl border premium-card glow-border">
+                <div key={day} className="h-32 mb-4 flex items-center justify-center bg-primary/10 rounded-xl border premium-card glow-border w-full">
                   <div className="text-center">
                     <div className="text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
                       {day}
@@ -759,14 +775,29 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
           <div className="flex-1 overflow-x-auto">
             <div className="min-w-[2400px]">
               {/* Time Headers Row */}
-              <div className="flex gap-2 mb-4">
-                {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour) => (
-                  <div key={hour} className="w-24 h-16 flex items-center justify-center bg-muted/30 rounded-xl border flex-shrink-0">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {hour === 0 ? '12am' : hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
-                    </span>
-                  </div>
-                ))}
+              <div className="flex items-center gap-1 mb-4">
+                {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour, hourIndex) => {
+                  const nextHour = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2][hourIndex + 1]
+                  const hasNextHour = nextHour !== undefined
+
+                  return (
+                    <div key={hour} className="flex items-center">
+                      {/* Time Header Card */}
+                      <div className="w-40 h-16 flex items-center justify-center bg-muted/30 rounded-xl border flex-shrink-0">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {hour === 0 ? '12am' : hour === 12 ? '12pm' : hour > 12 ? `${hour - 12}pm` : `${hour}am`}
+                        </span>
+                      </div>
+
+                      {/* Spacer for merge button alignment */}
+                      {hasNextHour && (
+                        <div className="w-6 h-6 flex items-center justify-center mx-1">
+                          {/* Empty space to align with merge buttons below */}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Time Slots Rows */}
@@ -774,8 +805,8 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                 const daySlots = getSlotsByDay(day)
 
                 return (
-                  <div key={day} className="flex gap-2 mb-4">
-                    {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour) => {
+                  <div key={day} className="flex items-center gap-1 mb-4">
+                    {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2].map((hour, hourIndex) => {
                       const slot = daySlots.find(s => {
                         const slotHour = new Date(s.startTime).getHours()
                         const slotDate = new Date(s.startTime).toDateString()
@@ -796,142 +827,173 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                       const isDragOver = dragOverTarget === slot?._id
                       const isDragging = draggedItem?.data?.slotId === slot?._id
 
+                      // Get next slot for merge button
+                      const nextHour = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2][hourIndex + 1]
+                      const nextSlot = nextHour !== undefined ? daySlots.find(s => {
+                        const slotHour = new Date(s.startTime).getHours()
+                        const slotDate = new Date(s.startTime).toDateString()
+                        const currentDate = new Date(s.day).toDateString()
+
+                        if (nextHour === 0 || nextHour === 1 || nextHour === 2) {
+                          const nextDay = new Date(s.day)
+                          nextDay.setDate(nextDay.getDate() + 1)
+                          return slotHour === nextHour && slotDate === nextDay.toDateString()
+                        }
+                        return slotHour === nextHour && slotDate === currentDate
+                      }) : null
+
+                      const canMerge = nextSlot && slot && !slot.merged && !nextSlot.merged
+                      const hasNextHour = nextHour !== undefined
+
                       return (
-                        <div
-                          key={`${day}-${hour}`}
-                          className={cn(
-                            "w-24 h-32 border rounded-xl transition-all duration-200 cursor-pointer group relative flex-shrink-0",
-                            hasTask
-                              ? slot?.task?.completed
-                                ? "bg-muted/50 opacity-75"
-                                : slot?.task?.eisenhowerCategory
-                                  ? eisenhowerColors[slot.task.eisenhowerCategory]
-                                  : priorityColors[slot?.task?.priority || "medium"]
-                              : "border-dashed border-muted hover:bg-muted/30 hover:border-primary/30",
-                            isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
-                            isDragOver && "drop-zone-active",
-                            isDragging && "drag-preview",
-                            "premium-card",
-                          )}
-                          onClick={() => slot && setSelectedSlot(isSelected ? null : slot._id)}
-                          onDragOver={(e) => {
-                            e.preventDefault()
-                            if (slot) {
-                              console.log("[WeeklySchedule] Drag over slot:", slot._id)
-                              handleDragOver(slot._id)
-                            }
-                          }}
-                          onDragLeave={handleDragLeave}
-                          onDrop={(e) => {
-                            e.preventDefault()
-                            if (slot) {
-                              console.log("[WeeklySchedule] Drop on slot:", slot._id)
-                              handleTaskDrop(slot._id)
-                              handleDragEnd()
-                            }
-                          }}
-                        >
-                          {/* Task Content */}
-                          {hasTask && slot?.task ? (
-                            <div
-                              className="p-2 h-full flex flex-col"
-                              draggable
-                              onDragStart={(e) => {
-                                if (slot?.task) {
-                                  console.log("[WeeklySchedule] Starting drag for task:", slot.task)
-                                  handleDragStart({
-                                    id: slot.task._id,
-                                    type: "task",
-                                    data: { slotId: slot._id, task: slot.task },
-                                  })
+                        <div key={`${day}-${hour}`} className="flex items-center">
+                          {/* Time Slot Card */}
+                          <div
+                            className={cn(
+                              "w-40 h-32 border rounded-xl transition-all duration-200 cursor-pointer group relative flex-shrink-0",
+                              hasTask
+                                ? slot?.task?.completed
+                                  ? "bg-muted/50 opacity-75"
+                                  : slot?.task?.eisenhowerCategory
+                                    ? eisenhowerColors[slot.task.eisenhowerCategory]
+                                    : priorityColors[slot?.task?.priority || "medium"]
+                                : "border-dashed border-muted hover:bg-muted/30 hover:border-primary/30",
+                              isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+                              isDragOver && "drop-zone-active",
+                              isDragging && "drag-preview",
+                              "premium-card",
+                            )}
+                            onClick={() => slot && setSelectedSlot(isSelected ? null : slot._id)}
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              if (slot) {
+                                console.log("[WeeklySchedule] Drag over slot:", slot._id)
+                                handleDragOver(slot._id)
+                              }
+                            }}
+                            onDragLeave={handleDragLeave}
+                            onDrop={(e) => {
+                              e.preventDefault()
+                              if (slot) {
+                                console.log("[WeeklySchedule] Drop on slot:", slot._id)
+                                handleTaskDrop(slot._id)
+                                handleDragEnd()
+                              }
+                            }}
+                          >
+                            {/* Task Content */}
+                            {hasTask && slot?.task ? (
+                              <div
+                                className="p-2 h-full flex flex-col"
+                                draggable
+                                onDragStart={(e) => {
+                                  if (slot?.task) {
+                                    console.log("[WeeklySchedule] Starting drag for task:", slot.task)
+                                    handleDragStart({
+                                      id: slot.task._id,
+                                      type: "task",
+                                      data: { slotId: slot._id, task: slot.task },
+                                    })
+                                  }
+                                }}
+                                onDragEnd={handleDragEnd}
+                              >
+                                {/* Title Section */}
+                                <div className="mb-1">
+                                  <h4
+                                    className={cn(
+                                      "text-xs font-bold leading-tight text-pretty line-clamp-2 mb-1",
+                                      slot.task?.completed && "line-through opacity-60",
+                                      slot.task?.eisenhowerCategory === "urgent-important" && "text-red-700 dark:text-red-300",
+                                      slot.task?.eisenhowerCategory === "urgent-not-important" && "text-orange-700 dark:text-orange-300",
+                                      slot.task?.eisenhowerCategory === "not-urgent-important" && "text-blue-700 dark:text-blue-300",
+                                      slot.task?.eisenhowerCategory === "not-urgent-not-important" && "text-gray-700 dark:text-gray-300"
+                                    )}
+                                  >
+                                    {slot.task?.title || "No Title"}
+                                  </h4>
+                                </div>
+
+                                {/* Description Section */}
+                                {slot.task?.description && (
+                                  <div className="mb-1 flex-1 min-h-0">
+                                    <p className="text-xs opacity-80 line-clamp-1 text-pretty leading-relaxed">
+                                      {slot.task.description}
+                                    </p>
+                                  </div>
+                                )}
+
+                                {/* Category Badge */}
+                                <div className="mb-1">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "text-xs font-medium px-1 py-0.5 w-fit",
+                                      slot.task?.category === "Work" && "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
+                                      slot.task?.category === "Health" && "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700",
+                                      slot.task?.category === "Personal" && "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700",
+                                      slot.task?.category === "Learning" && "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700",
+                                      slot.task?.category === "Family" && "bg-pink-100 text-pink-800 border-pink-300 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700",
+                                      slot.task?.category === "Break" && "bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-900/30 dark:text-gray-300 dark:border-gray-700"
+                                    )}
+                                  >
+                                    {slot.task?.category || "General"}
+                                  </Badge>
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div className="flex gap-1 mt-auto pt-1 border-t border-white/10">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-5 w-5 p-0 hover:bg-primary/10 focus-ring flex-1"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      if (slot?.task) {
+                                        console.log("[WeeklySchedule] Toggling completion for slot:", slot._id, "task:", slot.task)
+                                        toggleTaskCompletion(slot._id)
+                                      }
+                                    }}
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center h-full">
+                                <span className="text-xs text-muted-foreground">
+                                  {isDragOver ? "Drop here" : ""}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Selection Indicator */}
+                            {isSelected && <div className="absolute inset-0 bg-primary/5 rounded-xl pointer-events-none" />}
+                          </div>
+
+                          {/* Merge Button (between cards) - Always show for consistency */}
+                          {hasNextHour && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className={cn(
+                                "h-6 w-6 p-0 mx-1",
+                                canMerge
+                                  ? "hover:bg-primary/10 focus-ring cursor-pointer"
+                                  : "opacity-30 cursor-not-allowed"
+                              )}
+                              disabled={!canMerge}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (canMerge) {
+                                  console.log("[WeeklySchedule] Merging slots:", slot._id, "and", nextSlot._id)
+                                  mergeWithNext(slot._id, nextSlot._id)
                                 }
                               }}
-                              onDragEnd={handleDragEnd}
                             >
-                              {/* Title Section */}
-                              <div className="mb-1">
-                                <h4
-                                  className={cn(
-                                    "text-xs font-bold leading-tight text-pretty line-clamp-2 mb-1",
-                                    slot.task?.completed && "line-through opacity-60",
-                                    slot.task?.eisenhowerCategory === "urgent-important" && "text-red-700 dark:text-red-300",
-                                    slot.task?.eisenhowerCategory === "urgent-not-important" && "text-orange-700 dark:text-orange-300",
-                                    slot.task?.eisenhowerCategory === "not-urgent-important" && "text-blue-700 dark:text-blue-300",
-                                    slot.task?.eisenhowerCategory === "not-urgent-not-important" && "text-gray-700 dark:text-gray-300"
-                                  )}
-                                >
-                                  {slot.task?.title || "No Title"}
-                                </h4>
-                              </div>
-
-                              {/* Description Section */}
-                              {slot.task?.description && (
-                                <div className="mb-1 flex-1 min-h-0">
-                                  <p className="text-xs opacity-80 line-clamp-1 text-pretty leading-relaxed">
-                                    {slot.task.description}
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Category Badge */}
-                              <div className="mb-1">
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    "text-xs font-medium px-1 py-0.5 w-fit",
-                                    slot.task?.category === "Work" && "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
-                                    slot.task?.category === "Health" && "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700",
-                                    slot.task?.category === "Personal" && "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700",
-                                    slot.task?.category === "Learning" && "bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700",
-                                    slot.task?.category === "Family" && "bg-pink-100 text-pink-800 border-pink-300 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-700",
-                                    slot.task?.category === "Break" && "bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-900/30 dark:text-gray-300 dark:border-gray-700"
-                                  )}
-                                >
-                                  {slot.task?.category || "General"}
-                                </Badge>
-                              </div>
-
-
-                              {/* Action Buttons */}
-                              <div className="flex gap-1 mt-auto pt-1 border-t border-white/10">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-5 w-5 p-0 hover:bg-primary/10 focus-ring flex-1"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    if (slot?.task) {
-                                      console.log("[WeeklySchedule] Toggling completion for slot:", slot._id, "task:", slot.task)
-                                      toggleTaskCompletion(slot._id)
-                                    }
-                                  }}
-                                >
-                                  <Check className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-5 w-5 p-0 hover:bg-primary/10 focus-ring flex-1"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    console.log("[WeeklySchedule] Merging slot:", slot?._id, "with next")
-                                    if (slot) mergeWithNext(slot._id)
-                                  }}
-                                >
-                                  <Merge className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center h-full">
-                              <span className="text-xs text-muted-foreground">
-                                {isDragOver ? "Drop here" : ""}
-                              </span>
-                            </div>
+                              <Merge className="h-3 w-3" />
+                            </Button>
                           )}
-
-                          {/* Selection Indicator */}
-                          {isSelected && <div className="absolute inset-0 bg-primary/5 rounded-xl pointer-events-none" />}
                         </div>
                       )
                     })}
