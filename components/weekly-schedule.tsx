@@ -61,10 +61,17 @@ function getDaysToSchedule(): string[] {
     return ['Sunday']
   }
 
-  // Otherwise, include from today until Sunday
+  // Otherwise, include from today until Sunday (including Sunday)
   const daysToInclude = []
+
+  // Add days from current day to Saturday
   for (let i = currentDay; i <= 6; i++) {
     daysToInclude.push(allDays[i])
+  }
+
+  // Always add Sunday at the end (unless today is already Sunday)
+  if (currentDay !== 0) {
+    daysToInclude.push('Sunday')
   }
 
   return daysToInclude
