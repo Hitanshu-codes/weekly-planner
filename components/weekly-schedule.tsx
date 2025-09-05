@@ -1626,16 +1626,12 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                                   </Button>
                                 </div>
 
-                                {/* Comprehensive Edit Mode */}
+                                {/* Task Content - No inline editing */}
                                 {editingTask === slot.task._id ? (
-                                  <div className="p-2" onClick={(e) => e.stopPropagation()}>
-                                    <TaskEditForm
-                                      taskData={editingTaskData}
-                                      onSave={handleSaveTaskEdit}
-                                      onCancel={handleCancelTaskEdit}
-                                      isEditing={true}
-                                      saveButtonText="Save"
-                                    />
+                                  <div className="p-1 sm:p-2 h-full flex flex-col relative group">
+                                    <div className="text-center text-sm text-muted-foreground">
+                                      Editing...
+                                    </div>
                                   </div>
                                 ) : (
                                   <>
@@ -1689,18 +1685,8 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                             ) : (
                               <div className="flex items-center justify-center h-full relative group">
                                 {editingSlot === slot?._id ? (
-                                  <div className="p-1 sm:p-2 w-full" onClick={(e) => e.stopPropagation()}>
-                                    <TaskEditForm
-                                      taskData={newTaskData}
-                                      onSave={(data) => {
-                                        if (slot) {
-                                          handleCreateTask(slot._id, data)
-                                        }
-                                      }}
-                                      onCancel={handleCancelSlotEdit}
-                                      isEditing={false}
-                                      saveButtonText="Create"
-                                    />
+                                  <div className="text-center text-sm text-muted-foreground">
+                                    Creating...
                                   </div>
                                 ) : (
                                   <>
@@ -1807,6 +1793,31 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
           </ul>
         </CardContent>
       </Card>
+
+      {/* Popup Forms */}
+      {editingTask && (
+        <TaskEditForm
+          taskData={editingTaskData}
+          onSave={handleSaveTaskEdit}
+          onCancel={handleCancelTaskEdit}
+          isEditing={true}
+          saveButtonText="Save"
+        />
+      )}
+
+      {editingSlot && (
+        <TaskEditForm
+          taskData={newTaskData}
+          onSave={(data) => {
+            if (editingSlot) {
+              handleCreateTask(editingSlot, data)
+            }
+          }}
+          onCancel={handleCancelSlotEdit}
+          isEditing={false}
+          saveButtonText="Create"
+        />
+      )}
     </div>
   )
 }
