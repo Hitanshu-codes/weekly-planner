@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useState, useEffect } from "react"
-import { X, Calendar, Clock, Tag, AlertCircle } from "lucide-react"
+import { X, Calendar, Tag, AlertCircle } from "lucide-react"
 
 interface Task {
     _id: string
@@ -57,7 +57,9 @@ export function TaskEditForm({
     const handleInputChange = (field: keyof Task, value: string | number) => {
         setFormData(prev => ({
             ...prev,
-            [field]: value
+            [field]: value,
+            // Always set duration to 1 since it's not user-editable
+            duration: 1
         }))
     }
 
@@ -154,22 +156,6 @@ export function TaskEditForm({
                             </div>
                         </div>
 
-                        {/* Duration Input */}
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                                <Clock className="h-4 w-4 text-primary" />
-                                Duration (hours)
-                            </label>
-                            <input
-                                type="number"
-                                min="0.5"
-                                max="8"
-                                step="0.5"
-                                value={formData.duration || 1}
-                                onChange={(e) => handleInputChange('duration', parseFloat(e.target.value) || 1)}
-                                className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-foreground"
-                            />
-                        </div>
 
                         {/* Action Buttons */}
                         <div className="flex gap-3 pt-4">
