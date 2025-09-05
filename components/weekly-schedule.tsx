@@ -1410,7 +1410,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
       <div className="w-full">
         <div className="flex flex-col lg:flex-row">
           {/* Fixed Day Column - Hidden on mobile, shown on large screens */}
-          <div className="hidden lg:block w-40 flex-shrink-0">
+          <div className="hidden lg:block w-40 flex-shrink-0 mr-4">
             {/* Day Header */}
             <div className="h-16 flex items-center justify-center mb-4">
               <span className="text-lg font-semibold text-muted-foreground">Day</span>
