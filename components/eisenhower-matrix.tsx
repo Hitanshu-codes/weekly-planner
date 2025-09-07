@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Plus, GripVertical, Calendar, X } from "lucide-react"
+import { Plus, GripVertical, Calendar, X, Trash2, CheckSquare, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import { EisenhowerCategory } from "@/lib/models"
@@ -59,6 +59,9 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   const [displayDate, setDisplayDate] = useState<Date>(new Date())
   const [currentTime, setCurrentTime] = useState<Date>(new Date())
   const [showDatePicker, setShowDatePicker] = useState(false)
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const { draggedItem, dragOverTarget, handleDragStart, handleDragEnd, handleDragOver, handleDragLeave } = useDragDrop()
 
@@ -423,6 +426,75 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
     }
   }
 
+  // Task selection functions
+  const toggleTaskSelection = (taskId: string) => {
+    const newSelected = new Set(selectedTasks)
+    if (newSelected.has(taskId)) {
+      newSelected.delete(taskId)
+    } else {
+      newSelected.add(taskId)
+    }
+    setSelectedTasks(newSelected)
+  }
+
+  const selectAllTasksInQuadrant = (quadrant: 1 | 2 | 3 | 4) => {
+    const quadrantTasks = getTasksByQuadrant(quadrant)
+    const allSelected = quadrantTasks.every(task => selectedTasks.has(task._id))
+
+    const newSelected = new Set(selectedTasks)
+    if (allSelected) {
+      // Deselect all tasks in this quadrant
+      quadrantTasks.forEach(task => newSelected.delete(task._id))
+    } else {
+      // Select all tasks in this quadrant
+      quadrantTasks.forEach(task => newSelected.add(task._id))
+    }
+    setSelectedTasks(newSelected)
+  }
+
+  const selectAllTasks = () => {
+    const allSelected = tasks.every(task => selectedTasks.has(task._id))
+    if (allSelected) {
+      setSelectedTasks(new Set())
+    } else {
+      setSelectedTasks(new Set(tasks.map(task => task._id)))
+    }
+  }
+
+  // Delete selected tasks
+  const deleteSelectedTasks = async () => {
+    if (selectedTasks.size === 0) return
+
+    setIsDeleting(true)
+    try {
+      const deletePromises = Array.from(selectedTasks).map(taskId =>
+        fetch(`/api/tasks/${taskId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+          }
+        })
+      )
+
+      const results = await Promise.all(deletePromises)
+      const failedDeletes = results.filter(response => !response.ok)
+
+      if (failedDeletes.length === 0) {
+        // Remove deleted tasks from state
+        setTasks(tasks.filter(task => !selectedTasks.has(task._id)))
+        setSelectedTasks(new Set())
+        setShowDeleteConfirm(false)
+      } else {
+        console.error('Some tasks failed to delete')
+        // You could add a toast notification here
+      }
+    } catch (error) {
+      console.error('Error deleting tasks:', error)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   const handleQuadrantDrop = (quadrant: 1 | 2 | 3 | 4) => {
     if (!draggedItem || draggedItem.type !== "matrixTask") return
 
@@ -436,6 +508,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
   const handleDateSelect = async (selectedDate: Date) => {
     setDisplayDate(selectedDate)
     setShowDatePicker(false)
+    setSelectedTasks(new Set()) // Clear selected tasks when changing date
     await fetchTasksForDate(selectedDate)
   }
 
@@ -600,11 +673,112 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                 <Badge variant="outline" className="text-xs sm:text-sm">
                   {tasks.length} tasks
                 </Badge>
+                {selectedTasks.size > 0 && (
+                  <Badge variant="destructive" className="text-xs sm:text-sm">
+                    {selectedTasks.size} selected
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Task Selection Controls */}
+      {tasks.length > 0 && (
+        <Card className="premium-card glow-border light-shadow animate-scale-in">
+          <CardContent className="p-3 sm:p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={selectAllTasks}
+                  variant="outline"
+                  size="sm"
+                  className="btn-premium text-xs"
+                >
+                  {tasks.every(task => selectedTasks.has(task._id)) ? (
+                    <>
+                      <Square className="h-3 w-3 mr-1" />
+                      Deselect All
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare className="h-3 w-3 mr-1" />
+                      Select All
+                    </>
+                  )}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {selectedTasks.size} of {tasks.length} tasks selected
+                </span>
+              </div>
+              {selectedTasks.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    variant="destructive"
+                    size="sm"
+                    className="btn-premium text-xs"
+                    disabled={isDeleting}
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    {isDeleting ? "Deleting..." : `Delete ${selectedTasks.size} Task${selectedTasks.size > 1 ? 's' : ''}`}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <CardContent className="p-6 max-w-md mx-4">
+            <div className="space-y-4">
+              <div className="text-center">
+                <h3 className="text-lg font-semibold text-destructive mb-2">
+                  Delete Selected Tasks
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Are you sure you want to delete {selectedTasks.size} task{selectedTasks.size > 1 ? 's' : ''}?
+                  This action cannot be undone.
+                </p>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <Button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  variant="outline"
+                  size="sm"
+                  className="btn-premium"
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={deleteSelectedTasks}
+                  variant="destructive"
+                  size="sm"
+                  className="btn-premium"
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Tasks
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Add Task Form */}
       {/* <Card className="premium-card glow-border-strong light-shadow-lg animate-scale-in">
@@ -670,15 +844,30 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
             >
               <CardHeader className="pb-2 sm:pb-4">
                 <CardTitle className="flex items-center justify-between">
-                  <span className={cn(
-                    "text-sm sm:text-base md:text-lg font-bold",
-                    quadrant === 1 && "bg-gradient-to-r from-red-600 to-red-800 bg-clip-text text-transparent",
-                    quadrant === 2 && "bg-gradient-to-r from-green-600 to-green-800 bg-clip-text text-transparent",
-                    quadrant === 3 && "bg-gradient-to-r from-yellow-600 to-orange-600 bg-clip-text text-transparent",
-                    quadrant === 4 && "bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"
-                  )}>
-                    Q{quadrant}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "text-sm sm:text-base md:text-lg font-bold",
+                      quadrant === 1 && "bg-gradient-to-r from-red-600 to-red-800 bg-clip-text text-transparent",
+                      quadrant === 2 && "bg-gradient-to-r from-green-600 to-green-800 bg-clip-text text-transparent",
+                      quadrant === 3 && "bg-gradient-to-r from-yellow-600 to-orange-600 bg-clip-text text-transparent",
+                      quadrant === 4 && "bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"
+                    )}>
+                      Q{quadrant}
+                    </span>
+                    {quadrantTasks.length > 0 && (
+                      <button
+                        onClick={() => selectAllTasksInQuadrant(quadrant)}
+                        className="p-1 hover:bg-background/50 rounded transition-colors"
+                        title={quadrantTasks.every(task => selectedTasks.has(task._id)) ? "Deselect all" : "Select all"}
+                      >
+                        {quadrantTasks.every(task => selectedTasks.has(task._id)) ? (
+                          <CheckSquare className="h-3 w-3 text-primary" />
+                        ) : (
+                          <Square className="h-3 w-3 text-muted-foreground" />
+                        )}
+                      </button>
+                    )}
+                  </div>
                   <Badge variant={config.badge as any} className="text-xs sm:text-sm px-2 sm:px-3 py-1">
                     {quadrantTasks.length}
                   </Badge>
@@ -690,6 +879,7 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                 <div className="flex flex-col sm:grid sm:grid-cols-3 gap-2 sm:gap-3 min-h-0">
                   {quadrantTasks.map((task, taskIndex) => {
                     const isDragging = draggedItem?.data?.id === task._id
+                    const isSelected = selectedTasks.has(task._id)
 
                     return (
                       <div
@@ -698,9 +888,15 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                           "p-2 sm:p-3 bg-background/60 backdrop-blur-sm rounded-lg sm:rounded-xl border cursor-pointer transition-all duration-200 hover:shadow-md premium-card overflow-hidden",
                           task.completed ? "opacity-60 line-through" : "hover:scale-105",
                           isDragging && "drag-preview",
+                          isSelected && "ring-2 ring-primary/50 bg-primary/5"
                         )}
                         style={{ animationDelay: `${taskIndex * 0.05}s` }}
-                        onClick={() => toggleTask(task._id)}
+                        onClick={(e) => {
+                          // Don't toggle task completion if clicking on checkbox
+                          if (!(e.target as Element).closest('.task-checkbox')) {
+                            toggleTask(task._id)
+                          }
+                        }}
                         draggable
                         onDragStart={(e) => {
                           e.stopPropagation()
@@ -714,20 +910,34 @@ export function EisenhowerMatrix({ schedule }: EisenhowerMatrixProps) {
                       >
                         <div className="space-y-1 sm:space-y-2 min-h-0">
                           <div className="flex items-center gap-1 sm:gap-2 min-h-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleTaskSelection(task._id)
+                              }}
+                              className="task-checkbox p-0.5 hover:bg-background/50 rounded transition-colors flex-shrink-0"
+                              title={isSelected ? "Deselect task" : "Select task"}
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="h-3 w-3 sm:h-4 sm:w-4 text-primary" />
+                              ) : (
+                                <Square className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+                              )}
+                            </button>
                             <GripVertical className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground cursor-grab active:cursor-grabbing transition-opacity hover:opacity-100 flex-shrink-0" />
                             <span className="text-xs font-medium text-pretty line-clamp-2 leading-tight break-words min-w-0 flex-1">{task.title}</span>
                           </div>
 
                           {/* Task Details */}
                           {task.description && (
-                            <div className="ml-4 sm:ml-6 min-h-0">
+                            <div className="ml-6 sm:ml-8 min-h-0">
                               <p className="text-xs text-muted-foreground line-clamp-1 sm:line-clamp-2 break-words">{task.description}</p>
                             </div>
                           )}
 
                           {/* Day and Time Info */}
                           {(task.day || task.time !== undefined) && (
-                            <div className="ml-4 sm:ml-6 min-h-0">
+                            <div className="ml-6 sm:ml-8 min-h-0">
                               <div className="flex items-center gap-1 sm:gap-2 text-xs text-muted-foreground flex-wrap">
                                 {task.day && (
                                   <span className="px-1 sm:px-1.5 py-0.5 bg-primary/10 rounded text-primary font-medium text-xs whitespace-nowrap">
