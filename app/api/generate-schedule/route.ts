@@ -10,7 +10,7 @@ function getUpcomingSunday(today: Date = new Date()): Date {
   const diff = (7 - day) % 7 // days left until Sunday
   const sunday = new Date(today)
   sunday.setDate(today.getDate() + diff)
-  sunday.setHours(23, 59, 59, 999) // end of Sunday
+  sunday.setHours(8, 0, 0, 0) // end at Sunday 8am to avoid conflicts with late night slots
   return sunday
 }
 
@@ -18,9 +18,16 @@ function getUpcomingSunday(today: Date = new Date()): Date {
 function getDaysToSchedule(): string[] {
   const today = new Date()
   const currentDay = today.getDay() // 0 = Sunday, 6 = Saturday
+  const currentHour = today.getHours()
   const allDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-  // If today is Sunday, include only Sunday
+  // If today is Sunday after 8am, create schedule for next week
+  if (currentDay === 0 && currentHour >= 8) {
+    console.log("[API] Sunday after 8am detected, creating schedule for next week")
+    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  }
+
+  // If today is Sunday before 8am, include only Sunday
   if (currentDay === 0) {
     return ['Sunday']
   }
@@ -432,20 +439,36 @@ Guidelines:
         return NextResponse.json({ error: "User not found" }, { status: 404 })
       }
 
-      // Check if a schedule already exists for this week
-      const weekStartDate = new Date()
-      weekStartDate.setHours(0, 0, 0, 0) // Start of the week
+      // Check if a schedule already exists for the target week
+      const today = new Date()
+      const currentDay = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      const currentHour = today.getHours()
 
-      // Calculate the week range (Monday to Sunday)
-      const currentDay = weekStartDate.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-      const daysToMonday = currentDay === 0 ? 6 : currentDay - 1 // Days to get to Monday
-      const mondayDate = new Date(weekStartDate)
-      mondayDate.setDate(weekStartDate.getDate() - daysToMonday)
-      mondayDate.setHours(0, 0, 0, 0)
+      // Determine which week we're creating a schedule for
+      let targetWeekStart: Date
 
+      // If today is Sunday after 8am, we're creating a schedule for next week
+      if (currentDay === 0 && currentHour >= 8) {
+        console.log("[API] Sunday after 8am detected, checking for existing schedule in next week")
+        // Get next Monday
+        const daysToNextMonday = 1 // Sunday to Monday
+        targetWeekStart = new Date(today)
+        targetWeekStart.setDate(today.getDate() + daysToNextMonday)
+        targetWeekStart.setHours(0, 0, 0, 0)
+      } else {
+        // Otherwise, we're creating a schedule for the current week
+        console.log("[API] Creating schedule for current week")
+        const daysToMonday = currentDay === 0 ? 6 : currentDay - 1 // Days to get to Monday
+        targetWeekStart = new Date(today)
+        targetWeekStart.setDate(today.getDate() - daysToMonday)
+        targetWeekStart.setHours(0, 0, 0, 0)
+      }
+
+      // Calculate the week range (Monday to Sunday 8am)
+      const mondayDate = targetWeekStart
       const sundayDate = new Date(mondayDate)
       sundayDate.setDate(mondayDate.getDate() + 6)
-      sundayDate.setHours(23, 59, 59, 999)
+      sundayDate.setHours(8, 0, 0, 0) // End at Sunday 8am instead of 23:59:59
 
       console.log("[API] Checking for existing schedule between:", mondayDate.toISOString(), "and", sundayDate.toISOString())
 
@@ -524,6 +547,7 @@ Guidelines:
             // Get the current date and find the actual calendar date for each day of the week
             const today = new Date()
             const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+            const currentHour = today.getHours()
 
             // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
             const dayNameToNumber = {
@@ -540,7 +564,11 @@ Guidelines:
 
             // Calculate how many days to add to get to the target day
             let daysToAdd = targetDayNumber - currentDayOfWeek
-            if (daysToAdd <= 0) {
+
+            // If today is Sunday after 8am, we're creating a schedule for next week
+            if (currentDayOfWeek === 0 && currentHour >= 8) {
+              daysToAdd += 7 // Add a full week to get to next week
+            } else if (daysToAdd <= 0) {
               daysToAdd += 7 // If the day has passed this week, go to next week
             }
 
@@ -590,7 +618,7 @@ Guidelines:
       // Create weekly schedule
       const weeklySchedule = new WeeklySchedule({
         userId: user._id,
-        weekStartDate: weekStartDate,
+        weekStartDate: mondayDate, // Use the calculated target week start date
         goals: goals,
         timeSlots: createdTimeSlots.map(ts => ts._id),
         isActive: true,

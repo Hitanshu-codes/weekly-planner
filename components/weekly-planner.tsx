@@ -9,7 +9,8 @@ import { EisenhowerMatrix } from "@/components/eisenhower-matrix"
 import { WeeklySchedule } from "@/components/weekly-schedule"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useAuth } from "@/components/auth/auth-provider"
-import { Calendar, Target, Sparkles, LogOut, User } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Calendar, Target, Sparkles, LogOut, User, Wand2, Copy, CheckCircle, X } from "lucide-react"
 
 export function WeeklyPlanner() {
   const [weeklyGoals, setWeeklyGoals] = useState("")
@@ -18,7 +19,54 @@ export function WeeklyPlanner() {
   const [activeTab, setActiveTab] = useState("matrix")
   const [showReplaceDialog, setShowReplaceDialog] = useState(false)
   const [pendingScheduleData, setPendingScheduleData] = useState<{ goals: string, existingScheduleId: string } | null>(null)
+  const [showPromptFix, setShowPromptFix] = useState(false)
+  const [fixedPrompt, setFixedPrompt] = useState<string>("")
+  const [isFixingPrompt, setIsFixingPrompt] = useState(false)
+  const [promptCopied, setPromptCopied] = useState(false)
   const { user, logout } = useAuth()
+
+  // Fix prompt using Gemini
+  const fixPrompt = async () => {
+    if (!weeklyGoals || isFixingPrompt) return
+
+    setIsFixingPrompt(true)
+    try {
+      const response = await fetch('/api/fix-prompt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`
+        },
+        body: JSON.stringify({
+          originalPrompt: weeklyGoals
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setFixedPrompt(data.fixedPrompt)
+        setShowPromptFix(true)
+        console.log('Prompt fixed successfully:', data.fixedPrompt)
+      } else {
+        console.error('Failed to fix prompt:', await response.text())
+      }
+    } catch (error) {
+      console.error('Error fixing prompt:', error)
+    } finally {
+      setIsFixingPrompt(false)
+    }
+  }
+
+  // Copy fixed prompt to clipboard
+  const copyFixedPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(fixedPrompt)
+      setPromptCopied(true)
+      setTimeout(() => setPromptCopied(false), 2000)
+    } catch (error) {
+      console.error('Failed to copy prompt:', error)
+    }
+  }
 
   const generateSchedule = async () => {
     if (!weeklyGoals.trim()) return
@@ -164,7 +212,23 @@ export function WeeklyPlanner() {
               onChange={(e) => setWeeklyGoals(e.target.value)}
               className="min-h-[100px] sm:min-h-[120px] resize-none text-sm sm:text-base leading-relaxed focus-ring premium-card"
             />
-            <div className="flex justify-end">
+            <div className="flex flex-col sm:flex-row gap-3 justify-end">
+              {weeklyGoals.trim() && (
+                <Button
+                  onClick={fixPrompt}
+                  disabled={isFixingPrompt}
+                  variant="outline"
+                  className="btn-premium text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-950/30 border-purple-300 dark:border-purple-700 text-sm sm:text-base px-4 sm:px-6 py-2 sm:py-3 h-auto"
+                >
+                  <Wand2 className={cn("h-4 w-4 sm:h-5 sm:w-5 mr-2 sm:mr-3", isFixingPrompt && "animate-spin")} />
+                  <span className="hidden sm:inline">
+                    {isFixingPrompt ? "Fixing Prompt..." : "Fix Prompt with AI"}
+                  </span>
+                  <span className="sm:hidden">
+                    {isFixingPrompt ? "Fixing..." : "Fix Prompt"}
+                  </span>
+                </Button>
+              )}
               <Button
                 onClick={generateSchedule}
                 disabled={!weeklyGoals.trim() || isGenerating}
@@ -213,6 +277,61 @@ export function WeeklyPlanner() {
           <WeeklySchedule schedule={generatedSchedule} />
         </TabsContent>
       </Tabs>
+
+      {/* Fixed Prompt Display */}
+      {showPromptFix && fixedPrompt && (
+        <Card className="premium-card glow-border light-shadow bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                AI-Improved Prompt
+              </CardTitle>
+              <div className="flex gap-2">
+                <Button
+                  onClick={copyFixedPrompt}
+                  size="sm"
+                  variant="outline"
+                  className="btn-premium text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-950/30 border-purple-300 dark:border-purple-700"
+                >
+                  {promptCopied ? (
+                    <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                  ) : (
+                    <Copy className="h-4 w-4 mr-2" />
+                  )}
+                  {promptCopied ? "Copied!" : "Copy"}
+                </Button>
+                <Button
+                  onClick={() => setShowPromptFix(false)}
+                  size="sm"
+                  variant="outline"
+                  className="btn-premium"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground mb-2">Original Prompt:</h4>
+                <div className="p-3 bg-muted/30 rounded-lg border text-sm">
+                  {weeklyGoals}
+                </div>
+              </div>
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground mb-2">AI-Improved Prompt:</h4>
+                <div className="p-3 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30 rounded-lg border border-purple-200 dark:border-purple-800 text-sm whitespace-pre-wrap">
+                  {fixedPrompt}
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                💡 Copy this improved prompt and use it to generate a better schedule with more specific instructions and better structure.
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Replace Schedule Confirmation Dialog */}
       {showReplaceDialog && (

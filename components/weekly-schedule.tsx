@@ -54,9 +54,16 @@ const eisenhowerColors = {
 function getDaysToSchedule(): string[] {
   const today = new Date()
   const currentDay = today.getDay() // 0 = Sunday, 6 = Saturday
+  const currentHour = today.getHours()
   const allDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-  // If today is Sunday, include only Sunday
+  // If today is Sunday after 8am, create schedule for next week
+  if (currentDay === 0 && currentHour >= 8) {
+    console.log("[WeeklySchedule] Sunday after 8am detected, showing schedule for next week")
+    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+  }
+
+  // If today is Sunday before 8am, include only Sunday
   if (currentDay === 0) {
     return ['Sunday']
   }
@@ -109,6 +116,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
     isSelecting: false
   })
   const [isProcessingSchedule, setIsProcessingSchedule] = useState(false)
+  const [isDeletingSchedule, setIsDeletingSchedule] = useState(false)
 
   console.log("[WeeklySchedule] Component render - schedule:", schedule, "timeSlots.length:", timeSlots.length)
 
@@ -284,6 +292,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
                   // Get the current date and find the actual calendar date for each day of the week
                   const today = new Date()
                   const currentDayOfWeek = today.getDay() // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+                  const currentHour = today.getHours()
 
                   // Map day names to day numbers (Monday = 1, Tuesday = 2, etc.)
                   const dayNameToNumber = {
@@ -300,7 +309,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
                   // Calculate how many days to add to get to the target day
                   let daysToAdd = targetDayNumber - currentDayOfWeek
-                  if (daysToAdd <= 0) {
+
+                  // If today is Sunday after 8am, we're creating a schedule for next week
+                  if (currentDayOfWeek === 0 && currentHour >= 8) {
+                    daysToAdd += 7 // Add a full week to get to next week
+                  } else if (daysToAdd <= 0) {
                     daysToAdd += 7 // If the day has passed this week, go to next week
                   }
 
@@ -340,13 +353,20 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
             // Calculate the expected start time for this slot
             const today = new Date()
             const currentDayOfWeek = today.getDay()
+            const currentHour = today.getHours()
             const dayNameToNumber = {
               'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4,
               'Friday': 5, 'Saturday': 6, 'Sunday': 0
             }
             const targetDayNumber = dayNameToNumber[day as keyof typeof dayNameToNumber]
             let daysToAdd = targetDayNumber - currentDayOfWeek
-            if (daysToAdd <= 0) daysToAdd += 7
+
+            // If today is Sunday after 8am, we're creating a schedule for next week
+            if (currentDayOfWeek === 0 && currentHour >= 8) {
+              daysToAdd += 7 // Add a full week to get to next week
+            } else if (daysToAdd <= 0) {
+              daysToAdd += 7 // If the day has passed this week, go to next week
+            }
 
             const dayDate = new Date(today)
             dayDate.setDate(today.getDate() + daysToAdd)
@@ -388,7 +408,11 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
               // Calculate how many days to add to get to the target day
               let daysToAdd = targetDayNumber - currentDayOfWeek
-              if (daysToAdd <= 0) {
+
+              // If today is Sunday after 8am, we're creating a schedule for next week
+              if (currentDayOfWeek === 0 && currentHour >= 8) {
+                daysToAdd += 7 // Add a full week to get to next week
+              } else if (daysToAdd <= 0) {
                 daysToAdd += 7 // If the day has passed this week, go to next week
               }
 
@@ -453,6 +477,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
 
   // Delete entire schedule
   const deleteSchedule = async () => {
+    setIsDeletingSchedule(true)
     try {
       // Delete all time slots
       for (const slot of timeSlots) {
@@ -496,6 +521,8 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
       console.log('Schedule deleted successfully')
     } catch (error) {
       console.error('Error deleting schedule:', error)
+    } finally {
+      setIsDeletingSchedule(false)
     }
   }
 
@@ -1209,12 +1236,21 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
               <div className="flex gap-4 justify-center pt-4">
                 <Button
                   onClick={deleteSchedule}
+                  disabled={isDeletingSchedule}
                   className="btn-premium bg-red-600 hover:bg-red-700 text-white"
                 >
-                  Yes, Delete Schedule
+                  {isDeletingSchedule ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                      Deleting...
+                    </>
+                  ) : (
+                    "Yes, Delete Schedule"
+                  )}
                 </Button>
                 <Button
                   onClick={handleDeleteCancel}
+                  disabled={isDeletingSchedule}
                   variant="outline"
                   className="btn-premium"
                 >
@@ -1405,6 +1441,7 @@ export function WeeklySchedule({ schedule }: ScheduleProps) {
           </CardContent>
         </Card>
       )}
+
 
       {/* Weekly Grid - Mobile Optimized */}
       <div className="w-full">
