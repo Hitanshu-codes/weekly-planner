@@ -99,6 +99,7 @@ For each task, you must categorize it using the Eisenhower Matrix:
 
 Return a JSON object with this exact structure (only include the days mentioned above):
 IMPORTANT: The keys inside each day are the time in 24-hour format (0-23) and should be in chronological order.
+CRITICAL: Each hour (0-23) can have ONLY ONE task. Do not assign multiple tasks to the same hour.
 
 {
   "Monday": {
@@ -148,6 +149,7 @@ Guidelines:
 - Set appropriate priorities: "high", "medium", "low"
 - Use categories like: "Work", "Health", "Personal", "Learning", "Family", "Break", "Education", "College", "Fitness", "Social", "Finance", "Hobby", "Travel", "Shopping", "Maintenance", "General"
 - CRITICAL: Assign eisenhowerCategory to each task based on urgency and importance
+- CRITICAL: Each hour (0-23) must have exactly ONE task or be empty. Never assign multiple tasks to the same hour.
 - Make descriptions specific and actionable
 - Consider the user's stated goals and preferences
 - Return ONLY the JSON object, no additional text or markdown formatting
@@ -211,6 +213,18 @@ Guidelines:
             if (!hasValidDays) {
               console.log("[API] Schedule doesn't have expected day structure, using fallback")
               throw new Error("Invalid schedule structure")
+            }
+
+            // Validate that each hour has only one task
+            for (const [day, daySchedule] of Object.entries(schedule)) {
+              if (daySchedule && typeof daySchedule === "object") {
+                const hours = Object.keys(daySchedule)
+                const uniqueHours = new Set(hours)
+                if (hours.length !== uniqueHours.size) {
+                  console.log(`[API] Found duplicate hours in ${day}, using fallback`)
+                  throw new Error("Duplicate hours found in schedule")
+                }
+              }
             }
           } else {
             throw new Error("Schedule is not an object")
@@ -523,7 +537,20 @@ Guidelines:
           console.log(`[API] Skipping ${day} as it's not in the current schedule period`)
           continue
         }
+
+        // Track used hours for this day to prevent duplicates
+        const usedHours = new Set<number>()
+
         for (const [hour, taskData] of Object.entries(daySchedule as any)) {
+          const hourNum = parseInt(hour)
+
+          // Skip if this hour is already used
+          if (usedHours.has(hourNum)) {
+            console.log(`[API] Skipping duplicate hour ${hour} on ${day}`)
+            continue
+          }
+
+          usedHours.add(hourNum)
           if (taskData && typeof taskData === 'object') {
             const task = taskData as any // Type assertion for task data
 
